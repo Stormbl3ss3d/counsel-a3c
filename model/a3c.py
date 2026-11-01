@@ -181,6 +181,7 @@ class GCNActorCritic(nn.Module):
         self.obs = []
         self.acts = []
         self.rews = []
+        self.masks = []   # FIX bug 2: mask used when each action was sampled
 
         node_num = observation_space.shape[0]
         feature_num = observation_space.shape[1] - node_num
@@ -216,16 +217,18 @@ class GCNActorCritic(nn.Module):
         return a.cpu().numpy(), v.cpu().numpy(), logp_a.cpu().numpy()
         
 
-    def remember(self, obs, act, rew,):
+    def remember(self, obs, act, rew, mask):
         self.obs.append(obs)
         self.acts.append(float(act))
         self.rews.append(rew)
+        self.masks.append(np.asarray(mask, dtype=np.float32))   # FIX bug 2
 
         
     def clear_memory(self):
         self.obs = []
         self.acts = []
         self.rews = []
+        self.masks = []   # FIX bug 2
     
 
     def forward(self, obs):
@@ -325,7 +328,10 @@ class GCNActorCritic(nn.Module):
         normalized_advantages = (advantages - mean) / std
         
         returns = returns.detach()
-        pi = self.pi._distribution(states)
+        # FIX bug 2: score actions under the same masked distribution they were sampled from
+        masks = torch.from_numpy(np.array(self.masks, dtype=np.float32)).to(self.device)
+        logits = self.pi._get_logits(states).masked_fill(masks == 0, -1e9)
+        pi = Categorical(logits=logits)
         log_prob_actions = pi.log_prob(actions)
         
         actor_loss = - (normalized_advantages * log_prob_actions)

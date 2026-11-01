@@ -87,7 +87,7 @@ class Agent(mp.Process):
                 utils_collection.append(end_util)
                 score.append(reward)
                 breach_collection.append(breach)
-                self.local_actor_critic.remember(obs, action, reward)
+                self.local_actor_critic.remember(obs, action, reward, m)   # FIX bug 2: m = mask action was sampled under (bug 1 left as is: obs is still the NEXT state)
                 # done = False
                 
                 if t_step % self.steps_in_epoch == 0 or done:
@@ -100,6 +100,7 @@ class Agent(mp.Process):
                     #calling the optimizer to update the weights
                     self.pi_optim.zero_grad()
                     self.vf_optim.zero_grad()
+                    self.local_actor_critic.zero_grad()   # FIX bug 3: torch>=2.0 zero_grad sets global grads to None, so local grads were never cleared
                     
                     #doing backward on the loss
                     critic_loss = critic_loss.mean()
