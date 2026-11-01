@@ -87,7 +87,7 @@ class Agent(mp.Process):
                 utils_collection.append(end_util)
                 score.append(reward)
                 breach_collection.append(breach)
-                self.local_actor_critic.remember(obs, action, reward, m)   # FIX bug 2: m = mask action was sampled under (bug 1 left as is: obs is still the NEXT state)
+                self.local_actor_critic.remember(o, action, reward, m)   # FIX bug 1: store the state the action was CHOSEN in (o), not the next state (obs); FIX bug 2: m = its mask
                 # done = False
                 
                 if t_step % self.steps_in_epoch == 0 or done:
@@ -95,7 +95,7 @@ class Agent(mp.Process):
                         self.local_actor_critic.clear_memory()
                         t_step += 1
                         continue
-                    critic_loss, actor_loss = self.local_actor_critic.calculate_loss(done)
+                    critic_loss, actor_loss = self.local_actor_critic.calculate_loss(done, obs)   # FIX bug 1: obs = state after the last action, for bootstrapping
                     
                     #calling the optimizer to update the weights
                     self.pi_optim.zero_grad()

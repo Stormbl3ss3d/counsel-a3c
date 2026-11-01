@@ -262,13 +262,13 @@ class GCNActorCritic(nn.Module):
 
         return loss_pi, pi_info
     
-    def calc_R(self, done:bool):
-        obs_array = np.array(self.obs, dtype=np.float32)
-        states = torch.from_numpy(obs_array).to(self.device)
-        # states = torch.tensor(self.obs, dtype=torch.float).to(self.device)
-        v = self.v(states)
-        returns = []   
-        R = v[-1]*(1-int(done)) 
+    def calc_R(self, done:bool, last_obs):
+        # FIX bug 1 (companion): self.obs now holds the states actions were CHOSEN in, so obs[-1]
+        # is s_{T-1}. Bootstrap from V(s_T), the state AFTER the last action, passed in explicitly.
+        with torch.no_grad():
+            v_last = self.v(torch.as_tensor(np.asarray(last_obs), dtype=torch.float32).to(self.device))
+        returns = []
+        R = v_last*(1-int(done))
 
         for r in self.rews[::-1]:
             R = r + 0.95 * R
@@ -292,7 +292,7 @@ class GCNActorCritic(nn.Module):
 
         return advantages
     
-    def calculate_loss(self, done, discount_factor=0.95, trace_decay=0.97):
+    def calculate_loss(self, done, last_obs, discount_factor=0.95, trace_decay=0.97):
 
         # states = torch.tensor(self.obs, dtype=torch.float).to(self.device)
         # actions = torch.tensor(self.acts, dtype=torch.float).to(self.device)
@@ -304,7 +304,7 @@ class GCNActorCritic(nn.Module):
         rewards = np.array(self.rews, dtype=np.float32)
         rewards = torch.from_numpy(rewards).to(self.device)
 
-        returns = self.calc_R(done)
+        returns = self.calc_R(done, last_obs)
         returns = torch.tensor(returns).to(self.device)
         values = self.v(states).squeeze()
 
