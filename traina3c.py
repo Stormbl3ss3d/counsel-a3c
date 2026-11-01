@@ -146,7 +146,7 @@ class Agent(mp.Process):
                 self.episode_idx.value += 1
                 # if self.episode_idx.value % 10 == 0:
                 #save if it is the last episode or multiples of save_every
-                if self.episode_idx.value == self.epochs:
+                if self.episode_idx.value % 100 == 0 or self.episode_idx.value == self.epochs:
                     torch.save(self.global_ac, 'a3c/'+self.exp_name+'/model/model'+str(self.episode_idx.value)+'.pt')
             print(self.name, 'Ep:', self.episode_idx.value, '| Loss: ', critic_loss.item(), actor_loss.item(), ' | Util: ', util_score, ' | Reward: ', reward_score ,flush=True)
         
