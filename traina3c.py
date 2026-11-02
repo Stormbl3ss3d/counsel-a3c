@@ -174,6 +174,11 @@ if __name__ == '__main__':
     parser.add_argument('-ncp', "--ncomp", help="NFV Components", type=int)
     parser.add_argument('-ncf', "--nconf", help="VM Instances", type=int)
     parser.add_argument('-nw', "--nworkers", help="Number of workers", type=int)
+    # FIX5: training conditions as flags (defaults = upstream behaviour)
+    parser.add_argument("--slo", type=int, default=None, help="SLO (upstream: 250)")
+    parser.add_argument("--freq", type=int, default=None, help="load freq (upstream: 1e6/randint(0.8*slo,1.2*slo), drawn once per run)")
+    parser.add_argument("--budget", type=int, nargs=2, default=None, help="cpu mem budget (upstream: hyperparams.json)")
+    parser.add_argument("--overrun", type=float, default=None, help="budget overrun allowance (upstream: hyperparams budget_relax)")
     args = parser.parse_args()
 
     if args.exp_name:
@@ -193,16 +198,22 @@ if __name__ == '__main__':
 
     # slo = int(np.exp(np.random.randint(240,840)/100))
     # freq = int(1e6 / np.random.randint(int(slo*0.8), int(slo*1.2)))
-    slo = 250
-    freq = int(1e6 / np.random.randint(int(slo*0.8), int(slo*1.2)))
+    slo = args.slo if args.slo is not None else 250
+    freq = args.freq if args.freq is not None else int(1e6 / np.random.randint(int(slo*0.8), int(slo*1.2)))
     # dict of knob values from the name of the experiment
     knob = hyperparams["knob"] # For over, under and near provisioning
     print(f"SLO: {slo}, Freq: {freq}, Knob: {knob}")
     for i in range(hyperparams["nworkers"]):
         set_slo(slo, freq, knob, port=8000+i)
 
-    budget = hyperparams["budget"]
-    overrun_lim = hyperparams["budget_relax"]
+    budget = args.budget if args.budget is not None else hyperparams["budget"]
+    overrun_lim = args.overrun if args.overrun is not None else hyperparams["budget_relax"]
+    print(f"Budget: {budget}, Overrun allowance: {overrun_lim}", flush=True)
+    os.makedirs("a3c/"+hyperparams["exp_name"], exist_ok=True)
+    with open("a3c/"+hyperparams["exp_name"]+"/train_conditions.json", "w") as f:   # provenance
+        json.dump({"slo": slo, "freq": freq, "knob": knob, "budget": budget, "overrun": overrun_lim,
+                   "nconf": hyperparams["nconf"], "ncomp": hyperparams["ncomp"], "nworkers": hyperparams["nworkers"],
+                   "epochs": hyperparams["epochs"], "torch": torch.__version__}, f, indent=1)
     mode = hyperparams["mode"]
     threads = hyperparams["threads"]
     nconf = hyperparams["nconf"]
