@@ -61,3 +61,10 @@ Scripts are now in `experiments/inference/` (commit 6cf3462; only output paths c
 | Decision quality: PPO (Sep) vs A3C (Oct, pre-fix) | quality_eval.py | results/inference/quality_summary.csv | [measured] compares against the pre-fix, collapsed A3C models. Summary file dated 2026-10-15, script 2026-10-09 |
 | Scaling with worker count | generate_scaling_demo.py | held back: scaling_results.csv / scaling_plot.png stay in the archive | [measured] but unreliable: one repeat, 2000 steps total, unseeded; 8 workers need ports 8004-8007, which no compose file defines. Not for report use until re-run |
 | A3C training wall time, 8 configs | scripts/run_counsel_local.sh | logs/parallel_training_time_log.txt | [measured] 1196 min, -nw 4 |
+
+## Training-code notes from fix6 (tag fix6)
+- Loss column order in `Ep:` lines: runs before commit eb27ae7 print (actor, critic); runs from eb27ae7 on print (critic, actor).
+- fix6 Ep lines end with `| Ent: <mean policy entropy of the last update, decision steps only>` (nan = no actor update).
+- Episode counter can end up to (nworkers - 1) past -e: each worker checks `< epochs` and then runs a whole episode. The final checkpoint is saved once, at == epochs.
+- --resume restores weights only; SharedAdam moments restart (train_conditions.json: resume_optimizer_state = "fresh"). Resuming into the same run folder is refused before anything is written.
+- Smoke test of fix6 (2026-11-11, counsel:t113, f5-c3, eval conditions, --ent 0.001, -nw 4): 8 episodes, then resume to 16 under a new name. It runs, logs Ent, resumes and refuses a same-folder resume. Not a training result.
