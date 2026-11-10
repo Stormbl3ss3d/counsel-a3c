@@ -1,17 +1,49 @@
+# counsel-a3c-fresh: 4 seeded load servers + on-demand tool/model containers, all on counsel:t113.
+#   docker compose up -d loadserver_0 loadserver_1 loadserver_2 loadserver_3
+#   docker compose run --rm -T tools python3 tools/test_seed.py
+x-base: &base
+  build: {context: ., dockerfile: Dockerfile.t113}
+  image: counsel:t113
+  network_mode: host
+  working_dir: /counsel
+  user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+  volumes: ["./:/counsel"]
+
+x-loadserver: &loadserver
+  <<: *base
+  working_dir: /counsel/load-gen
+  command: ["sh", "-c", "exec uvicorn loadserver:app --host 127.0.0.1 --port $$PORT --log-level warning"]
+  healthcheck:        # hits /docs, NOT /load (a /load probe would advance the stateful stream)
+    test: ["CMD", "python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ['PORT'] + '/docs')"]
+    interval: 2s
+    timeout: 3s
+    retries: 15
+
+x-wait: &wait
+  loadserver_0: {condition: service_healthy}
+  loadserver_1: {condition: service_healthy}
+  loadserver_2: {condition: service_healthy}
+  loadserver_3: {condition: service_healthy}
+
 services:
-  loadserver:
-    image: load-gen
-    build: ./load-gen
-    container_name: loadserver
-    expose:
-      - "8000"
-    ports:
-      - "8000:8000"
-    environment:
-      - "LOADSERVER_PORT=8000"
-      - "LOADSERVER_HOST=0.0.0.0"
-  model:
-    image: counsel
-    build: .
+  loadserver_0: {<<: *loadserver, container_name: loadserver_0, environment: {PORT: "8000", HOME: /tmp}}
+  loadserver_1: {<<: *loadserver, container_name: loadserver_1, environment: {PORT: "8001", HOME: /tmp}}
+  loadserver_2: {<<: *loadserver, container_name: loadserver_2, environment: {PORT: "8002", HOME: /tmp}}
+  loadserver_3: {<<: *loadserver, container_name: loadserver_3, environment: {PORT: "8003", HOME: /tmp}}
+
+  tools:              # ad-hoc runner: tools/*.py (test_seed, eval_harness, bc_*, steplog)
+    <<: *base
+    profiles: ["tools"]
+    shm_size: "2gb"
+    environment: {HOME: /tmp, PYTHONPATH: /counsel}   # scripts in tools/ import model.*
+    depends_on: *wait
+    command: ["bash"]
+
+  model:              # parallel inference benchmark; only runs when named
+    <<: *base
     container_name: counsel
-    network_mode: "host"
+    profiles: ["run"]
+    shm_size: "2gb"
+    environment: {HOME: /tmp, PYTHONPATH: /counsel}
+    depends_on: *wait
+    command: ["python3", "-u", "experiments/inference/inference_parallel_a3c.py"]
