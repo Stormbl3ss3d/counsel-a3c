@@ -1,0 +1,25 @@
+# Example spec: re-create the overnight fix6 ent 0.001 run, then evaluate every checkpoint.
+# Anything left out takes the default in counselctl.py (DEFAULTS).
+name  = "t113-fix6-f5-c3-ent001-r2"
+image = "counsel:t113"
+
+[env]
+flavors = 5
+chain   = 3
+workers = 4
+
+[conditions]            # = eval conditions, and what fix5/fix6 trained on
+slo     = 150
+freq    = 6666
+budget  = [2500, 3600]
+overrun = 0.2
+knob    = 0.05
+
+[train]
+episodes = 1000
+ent      = 0.001
+
+[eval]
+seeds       = "1000-1009"
+modes       = ["greedy", "sample"]
+checkpoints = "all"
