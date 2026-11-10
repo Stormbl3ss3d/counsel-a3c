@@ -255,7 +255,7 @@ if __name__ == '__main__':
     #optim = SharedAdam(global_actor_critic.parameters(), lr=lr, 
     #                    betas=(0.92, 0.999))
     pi_optim = SharedAdam(global_actor_critic.pi.parameters(), lr=pi_lr)
-    v_optim = SharedAdam(global_actor_critic.v.parameters(), lr=vf_lr)
+    v_optim = SharedAdam(global_actor_critic.v.v_net.parameters(), lr=vf_lr)  # FIX bug 5: GCN is shared; only pi_optim steps it
     
     global_ep = mp.Value('i', 0)
     sys.stdout.flush()
