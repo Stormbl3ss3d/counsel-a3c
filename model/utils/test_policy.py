@@ -83,7 +83,7 @@ def run_policy(env, get_action, output_fname, num_episodes=50):
     while n < num_episodes:
 
         a = get_action(o, m)
-        o, m, r, d, _ = env.step(a)
+        o, m, r, d, *_ = env.step(a)
         ep_ret += r
         ep_len += 1
 
