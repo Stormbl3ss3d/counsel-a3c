@@ -1,0 +1,14 @@
+# Smoke test: tiny run to check the plumbing, not a result. About a minute.
+name  = "smoke-fix6-01"
+code  = "fix6"
+image = "counsel:t113"
+
+[env]
+workers = 2
+
+[train]
+episodes = 6
+ent      = 0.001
+
+[eval]
+seeds = "1000-1001"

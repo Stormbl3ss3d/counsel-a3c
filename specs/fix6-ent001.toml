@@ -1,6 +1,7 @@
 # Example spec: re-create the overnight fix6 ent 0.001 run, then evaluate every checkpoint.
 # Anything left out takes the default in counselctl.py (DEFAULTS).
 name  = "t113-fix6-f5-c3-ent001-r2"
+code  = "fix6"
 image = "counsel:t113"
 
 [env]

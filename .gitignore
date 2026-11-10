@@ -145,3 +145,4 @@ results/raw/
 .~lock*
 results/eval/*/envlogs/
 scratch/
+runs/
