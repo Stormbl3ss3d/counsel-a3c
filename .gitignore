@@ -143,3 +143,4 @@ a3c/
 results/raw/
 *.pt
 .~lock*
+results/eval/*/envlogs/
