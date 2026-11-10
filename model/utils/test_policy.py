@@ -9,14 +9,19 @@ from .logx import EpochLogger
 from ..env import CloudEnv
 
 
+def _ckpt_dir(fpath):
+    """A3C runs save to <run>/model/modelN.pt, PPO (Spinning Up) runs to <run>/pyt_save/model.pt."""
+    d = osp.join(fpath, 'model')
+    return d if osp.isdir(d) else osp.join(fpath, 'pyt_save')
+
+
 def load_policy_and_env(fpath, itr='last', params=None):
 
     # handle which epoch to load from
     if itr=='last':
         # check filenames for epoch (AKA iteration) numbers, find maximum value
 
-        # pytsave_path = osp.join(fpath, 'pyt_save')
-        pytsave_path = os.path.join(fpath, 'model')
+        pytsave_path = _ckpt_dir(fpath)
         print("\n\n\n >>> aaa", pytsave_path, "\n\n\n")
         # Each file in this folder has naming convention 'modelXX.pt', where
         # 'XX' is either an integer or empty string. Empty string case
@@ -49,7 +54,7 @@ def load_policy_and_env(fpath, itr='last', params=None):
 def load_pytorch_policy(fpath, itr):
     """ Load a pytorch policy saved with Spinning Up Logger."""
     
-    fname = osp.join(fpath,'model', 'model'+itr+'.pt')
+    fname = osp.join(_ckpt_dir(fpath), 'model'+itr+'.pt')
     try:
         print("\n\n\n >>> ", fname, "\n\n\n")
         model = torch.load(f=fname)
