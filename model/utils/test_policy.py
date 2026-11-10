@@ -5,7 +5,6 @@ import os.path as osp
 import torch
 import sys
 sys.path.insert(0, '../../')
-from .logx import EpochLogger
 from ..env import CloudEnv
 
 
@@ -82,6 +81,7 @@ def run_policy(env, get_action, output_fname, num_episodes=50):
         "and we can't run the agent in it. :( \n\n Check out the readthedocs " + \
         "page on Experiment Outputs for how to handle this situation."
 
+    from .logx import EpochLogger    # lazy: logx -> mpi_tools imports mpi4py at module level
     logger = EpochLogger(output_dir='.',output_fname=output_fname)
     obs, r, d, ep_ret, ep_len, n = env.reset(), 0, False, 0, 0, 0
     o, m = obs
