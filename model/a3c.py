@@ -182,6 +182,7 @@ class GCNActorCritic(nn.Module):
         self.acts = []
         self.rews = []
         self.masks = []   # FIX bug 2: mask used when each action was sampled
+        self.decisions = []   # FIX bug 6: was a component flagged when the action was taken?
 
         node_num = observation_space.shape[0]
         feature_num = observation_space.shape[1] - node_num
@@ -217,11 +218,12 @@ class GCNActorCritic(nn.Module):
         return a.cpu().numpy(), v.cpu().numpy(), logp_a.cpu().numpy()
         
 
-    def remember(self, obs, act, rew, mask):
+    def remember(self, obs, act, rew, mask, decision=True):
         self.obs.append(obs)
         self.acts.append(float(act))
         self.rews.append(rew)
         self.masks.append(np.asarray(mask, dtype=np.float32))   # FIX bug 2
+        self.decisions.append(bool(decision))   # FIX bug 6
 
         
     def clear_memory(self):
@@ -229,6 +231,7 @@ class GCNActorCritic(nn.Module):
         self.acts = []
         self.rews = []
         self.masks = []   # FIX bug 2
+        self.decisions = []   # FIX bug 6
     
 
     def forward(self, obs):
@@ -322,22 +325,19 @@ class GCNActorCritic(nn.Module):
         advantages = advantages.detach()
         
 
-        #normalize advantages
-        mean = advantages.mean()
-        std = advantages.std()
-        normalized_advantages = (advantages - mean) / std
-        
-        returns = returns.detach()
+        # FIX bug 6: actor learns only from decision steps (a component was flagged); critic from all steps
+        dec = torch.as_tensor(self.decisions, dtype=torch.bool).to(self.device)
+        value_loss = (returns.detach() - values)**2
+        if int(dec.sum()) < 2:   # too few decisions for a normalised advantage: no actor update
+            return values.sum() * 0.0, value_loss
+        adv = advantages[dec]
+        normalized_advantages = (adv - adv.mean()) / (adv.std() + 1e-8)
         # FIX bug 2: score actions under the same masked distribution they were sampled from
         masks = torch.from_numpy(np.array(self.masks, dtype=np.float32)).to(self.device)
-        logits = self.pi._get_logits(states).masked_fill(masks == 0, -1e9)
+        logits = self.pi._get_logits(states[dec]).masked_fill(masks[dec] == 0, -1e9)
         pi = Categorical(logits=logits)
-        log_prob_actions = pi.log_prob(actions)
-        
+        log_prob_actions = pi.log_prob(actions[dec])
         actor_loss = - (normalized_advantages * log_prob_actions)
-
-        value_loss = (returns - values)**2
-
         return actor_loss, value_loss
     
     # def calculate_loss(self, done):

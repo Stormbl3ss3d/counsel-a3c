@@ -82,12 +82,16 @@ class Agent(mp.Process):
             # while not done:
             while t_step <= self.steps_in_epoch:    
                 #passing in the observation to make the action choice
-                action, _, _ = self.local_actor_critic.step(torch.as_tensor(o), torch.as_tensor(m))
+                decision = self.env.act_comp != -1   # FIX bug 6: act only when the load server flagged a component
+                if decision:
+                    action, _, _ = self.local_actor_critic.step(torch.as_tensor(o), torch.as_tensor(m))
+                else:
+                    action = 0   # nothing flagged: env.step ignores the action, so don't sample one
                 obs, mask, reward, done, _, end_util, breach = self.env.step(action)
                 utils_collection.append(end_util)
                 score.append(reward)
                 breach_collection.append(breach)
-                self.local_actor_critic.remember(o, action, reward, m)   # FIX bug 1: store the state the action was CHOSEN in (o), not the next state (obs); FIX bug 2: m = its mask
+                self.local_actor_critic.remember(o, action, reward, m, decision)   # FIX bug 1: store the state the action was CHOSEN in (o), not the next state (obs); FIX bug 2: m = its mask
                 # done = False
                 
                 # FIX: guard on batch size, without `continue` (it also skipped o/m, last_done and episode bookkeeping)
