@@ -185,6 +185,8 @@ if __name__ == '__main__':
     parser.add_argument("--slo", type=int, default=None, help="SLO (upstream: 250)")
     parser.add_argument("--freq", type=int, default=None, help="load freq (upstream: 1e6/randint(0.8*slo,1.2*slo), drawn once per run)")
     parser.add_argument("--budget", type=int, nargs=2, default=None, help="cpu mem budget (upstream: hyperparams.json)")
+    parser.add_argument("--resume", type=str, default=None, help="checkpoint .pt to resume from (weights only; optimiser moments restart)")
+    parser.add_argument("--start_ep", type=int, default=None, help="episode counter to resume at (default: N from modelN.pt)")
     parser.add_argument("--ent", type=float, default=0.0, help="entropy coefficient (bug 4; 0.0 = upstream, no entropy term)")
     parser.add_argument("--overrun", type=float, default=None, help="budget overrun allowance (upstream: hyperparams budget_relax)")
     args = parser.parse_args()
@@ -217,11 +219,15 @@ if __name__ == '__main__':
     budget = args.budget if args.budget is not None else hyperparams["budget"]
     overrun_lim = args.overrun if args.overrun is not None else hyperparams["budget_relax"]
     print(f"Budget: {budget}, Overrun allowance: {overrun_lim}", flush=True)
+    # checked before anything is written: this run's train_conditions.json, env CSV and utils/rewards/breach logs
+    if args.resume and os.path.abspath(args.resume).startswith(os.path.abspath("a3c/" + hyperparams["exp_name"]) + os.sep):
+        sys.exit("--resume: use a new -n run name; resuming into the same folder would overwrite that run's logs")
     os.makedirs("a3c/"+hyperparams["exp_name"], exist_ok=True)
     with open("a3c/"+hyperparams["exp_name"]+"/train_conditions.json", "w") as f:   # provenance
         json.dump({"slo": slo, "freq": freq, "knob": knob, "budget": budget, "overrun": overrun_lim,
                    "nconf": hyperparams["nconf"], "ncomp": hyperparams["ncomp"], "nworkers": hyperparams["nworkers"],
-                   "epochs": hyperparams["epochs"], "torch": torch.__version__, "ent": args.ent}, f, indent=1)
+                   "epochs": hyperparams["epochs"], "torch": torch.__version__, "ent": args.ent,
+                   "resume": args.resume, "start_ep": args.start_ep, "resume_optimizer_state": "fresh" if args.resume else None}, f, indent=1)
     mode = hyperparams["mode"]
     threads = hyperparams["threads"]
     nconf = hyperparams["nconf"]
@@ -253,6 +259,18 @@ if __name__ == '__main__':
 
     
     global_actor_critic = GCNActorCritic(env.observation_space, env.action_space)
+    start_ep = 0
+    if args.resume:   # weights only; SharedAdam moments restart from zero
+        import re
+        if args.start_ep is not None:
+            start_ep = args.start_ep
+        else:
+            mt = re.search(r"model(\d+)\.pt$", args.resume)
+            if not mt:
+                sys.exit("--resume: cannot parse the episode from the file name; pass --start_ep")
+            start_ep = int(mt.group(1))
+        global_actor_critic.load_state_dict(torch.load(args.resume, map_location="cpu").state_dict())
+        print("resumed from", args.resume, "at episode", start_ep, flush=True)
     #the global actor critic needed the env to setup the nn only
     env.close()
     
@@ -265,7 +283,7 @@ if __name__ == '__main__':
     pi_optim = SharedAdam(global_actor_critic.pi.parameters(), lr=pi_lr)
     v_optim = SharedAdam(global_actor_critic.v.v_net.parameters(), lr=vf_lr)  # FIX bug 5: GCN is shared; only pi_optim steps it
     
-    global_ep = mp.Value('i', 0)
+    global_ep = mp.Value('i', start_ep)
     sys.stdout.flush()
 
     workers = [Agent(experiment_name = hyperparams["exp_name"],
