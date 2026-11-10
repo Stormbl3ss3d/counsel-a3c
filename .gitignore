@@ -144,3 +144,4 @@ results/raw/
 *.pt
 .~lock*
 results/eval/*/envlogs/
+scratch/
