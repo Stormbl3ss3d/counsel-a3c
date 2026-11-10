@@ -3,6 +3,7 @@ import os
 from fastapi import FastAPI, APIRouter
 from pydantic import BaseModel
 import numpy as np
+from typing import Optional
 
 from arrival_rates.gen_arrivals import slo_bins, dir
 
@@ -10,6 +11,7 @@ class LoadSetter(BaseModel):
     slo: int
     freq: int
     knob: float
+    seed: Optional[int] = None
 
 class BaseLoad(BaseModel):
     cpu: list
@@ -17,6 +19,7 @@ class BaseLoad(BaseModel):
 
 class LoadServer:
     def __init__(self):
+        self.rng=np.random.default_rng()
         self.router = APIRouter()
         self.metrics = {
             "slo": 0,
@@ -29,6 +32,7 @@ class LoadServer:
         self.router.add_api_route('/load', self.get_load, methods=['GET'])
 
     def set_load(self, load:LoadSetter):
+        self.rng=np.random.default_rng(load.seed)
         self.slo = load.slo
         self.metrics['slo'] = self.slo
         self.freq = load.freq
@@ -44,6 +48,7 @@ class LoadServer:
         self.ep_gen = iter(self.arrivals)
         self.weight = np.log(self.slo) * self.knob
         self.new_episode()
+        return{"seed":load.seed,"n_arrivals":int(len(self.arrivals))}
 
     def set_base(self, base:BaseLoad):
         base.cpu = np.array(base.cpu)
@@ -57,8 +62,8 @@ class LoadServer:
         except StopIteration:
             self.ep_gen = iter(self.arrivals)
             self.episode_lambda = next(self.ep_gen) * self.freq
-        rand_size = np.random.choice([206, 451, 568, 818, 1000, 1212])
-        rand_start = np.random.randint(0, len(self.arrivals) - rand_size)
+        rand_size = int(self.rng.choice([206, 451, 568, 818, 1000, 1212]))
+        rand_start = int(self.rng.integers(0, len(self.arrivals) - rand_size))
         self.episode_arrivals = self.arrivals[rand_start:rand_start+rand_size]
         self.step_gen = self.step_generator()
 

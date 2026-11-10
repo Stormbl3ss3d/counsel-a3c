@@ -5,13 +5,17 @@ import time
 from .service_chain.component import Component
 
 
-def set_slo(slo:int, freq:int, knob:float, port=8000)->None:
+def set_slo(slo:int, freq:int, knob:float, port=8000,seed=None)->None:
     """
     Set the SLO for the load.
     """
     url = "http://localhost:"+str(port)+"/slo"
     query = {"slo": slo, "freq": freq, "knob": knob}
-    requests.put(url, json=query)
+    if seed is not None:
+        query["seed"]=seed
+    r=requests.put(url, json=query)
+    r.raise_for_status()
+    return r.json()
 
 def set_base(comps:List[Component], port = 8000)->None:
     """
