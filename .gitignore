@@ -137,3 +137,9 @@ inf_logs/*
 infer_logs/*
 logs/*
 a3c/log*
+# --- counsel-a3c-fresh working tree (2026-11-10) ---
+# Run outputs and raw logs live on disk only; results/RUNS.md is the tracked index.
+a3c/
+results/raw/
+*.pt
+.~lock*
