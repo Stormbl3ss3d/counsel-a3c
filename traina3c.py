@@ -95,7 +95,7 @@ class Agent(mp.Process):
                         self.local_actor_critic.clear_memory()
                         t_step += 1
                         continue
-                    critic_loss, actor_loss = self.local_actor_critic.calculate_loss(done, obs)   # FIX bug 1: obs = state after the last action, for bootstrapping
+                    actor_loss, critic_loss = self.local_actor_critic.calculate_loss(done, obs)   # FIX bug 1: obs = state after the last action, for bootstrapping; FIX: calculate_loss returns (actor, critic)
                     
                     #calling the optimizer to update the weights
                     self.pi_optim.zero_grad()
