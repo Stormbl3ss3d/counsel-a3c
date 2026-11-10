@@ -90,11 +90,12 @@ class Agent(mp.Process):
                 self.local_actor_critic.remember(o, action, reward, m)   # FIX bug 1: store the state the action was CHOSEN in (o), not the next state (obs); FIX bug 2: m = its mask
                 # done = False
                 
-                if t_step % self.steps_in_epoch == 0 or done:
-                    if done and t_step - last_done < 2:
-                        self.local_actor_critic.clear_memory()
-                        t_step += 1
-                        continue
+                # FIX: guard on batch size, without `continue` (it also skipped o/m, last_done and episode bookkeeping)
+                do_update = t_step % self.steps_in_epoch == 0 or done
+                if do_update and len(self.local_actor_critic.rews) < 2:   # 1-sample batch: advantage std undefined
+                    self.local_actor_critic.clear_memory()
+                    do_update = False
+                if do_update:
                     actor_loss, critic_loss = self.local_actor_critic.calculate_loss(done, obs)   # FIX bug 1: obs = state after the last action, for bootstrapping; FIX: calculate_loss returns (actor, critic)
                     
                     #calling the optimizer to update the weights
