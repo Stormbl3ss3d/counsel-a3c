@@ -32,7 +32,7 @@ class SharedAdam(torch.optim.Adam):
 
 
 class Agent(mp.Process):
-    def __init__(self, experiment_name, cloudConf, input_dim, n_actions, global_ac, gamma, pi_optim, vf_optim, name, global_ep_index, epochs):
+    def __init__(self, experiment_name, cloudConf, input_dim, n_actions, global_ac, gamma, pi_optim, vf_optim, name, global_ep_index, epochs, ent_coef=0.0):
         super(Agent, self).__init__()
         #creating a new actor critic model for each worker
         self.local_actor_critic = GCNActorCritic(input_dim, n_actions)
@@ -55,6 +55,8 @@ class Agent(mp.Process):
 
         self.save_every = 10;
         self.exp_name = experiment_name
+        self.ent_coef = ent_coef               # FIX bug 4
+        self.last_ent = float("nan")          # mean policy entropy of the last update (decision steps)
     
     def run(self):
         self.utils = {}
@@ -100,7 +102,7 @@ class Agent(mp.Process):
                     self.local_actor_critic.clear_memory()
                     do_update = False
                 if do_update:
-                    actor_loss, critic_loss = self.local_actor_critic.calculate_loss(done, obs)   # FIX bug 1: obs = state after the last action, for bootstrapping; FIX: calculate_loss returns (actor, critic)
+                    actor_loss, critic_loss, self.last_ent = self.local_actor_critic.calculate_loss(done, obs, ent_coef=self.ent_coef)   # FIX bug 1: obs = state after the last action, for bootstrapping; FIX: calculate_loss returns (actor, critic)
                     
                     #calling the optimizer to update the weights
                     self.pi_optim.zero_grad()
@@ -154,7 +156,7 @@ class Agent(mp.Process):
                 #save if it is the last episode or multiples of save_every
                 if self.episode_idx.value % 100 == 0 or self.episode_idx.value == self.epochs:
                     torch.save(self.global_ac, 'a3c/'+self.exp_name+'/model/model'+str(self.episode_idx.value)+'.pt')
-            print(self.name, 'Ep:', self.episode_idx.value, '| Loss: ', critic_loss.item(), actor_loss.item(), ' | Util: ', util_score, ' | Reward: ', reward_score ,flush=True)
+            print(self.name, 'Ep:', self.episode_idx.value, '| Loss: ', critic_loss.item(), actor_loss.item(), ' | Util: ', util_score, ' | Reward: ', reward_score, ' | Ent: ', self.last_ent, flush=True)
         
 
         with open('a3c/'+self.exp_name+'/utils'+self.name+'.json', 'w') as f:
@@ -183,6 +185,7 @@ if __name__ == '__main__':
     parser.add_argument("--slo", type=int, default=None, help="SLO (upstream: 250)")
     parser.add_argument("--freq", type=int, default=None, help="load freq (upstream: 1e6/randint(0.8*slo,1.2*slo), drawn once per run)")
     parser.add_argument("--budget", type=int, nargs=2, default=None, help="cpu mem budget (upstream: hyperparams.json)")
+    parser.add_argument("--ent", type=float, default=0.0, help="entropy coefficient (bug 4; 0.0 = upstream, no entropy term)")
     parser.add_argument("--overrun", type=float, default=None, help="budget overrun allowance (upstream: hyperparams budget_relax)")
     args = parser.parse_args()
 
@@ -218,7 +221,7 @@ if __name__ == '__main__':
     with open("a3c/"+hyperparams["exp_name"]+"/train_conditions.json", "w") as f:   # provenance
         json.dump({"slo": slo, "freq": freq, "knob": knob, "budget": budget, "overrun": overrun_lim,
                    "nconf": hyperparams["nconf"], "ncomp": hyperparams["ncomp"], "nworkers": hyperparams["nworkers"],
-                   "epochs": hyperparams["epochs"], "torch": torch.__version__}, f, indent=1)
+                   "epochs": hyperparams["epochs"], "torch": torch.__version__, "ent": args.ent}, f, indent=1)
     mode = hyperparams["mode"]
     threads = hyperparams["threads"]
     nconf = hyperparams["nconf"]
@@ -276,7 +279,7 @@ if __name__ == '__main__':
                     name=i,
                     global_ep_index=global_ep,
                     # epochs = epochs) for i in range(mp.cpu_count())]
-                    epochs = epochs) for i in range(hyperparams["nworkers"])]
+                    epochs = epochs, ent_coef = args.ent) for i in range(hyperparams["nworkers"])]
     start_time = datetime.datetime.now()
     [w.start() for w in workers]
     [w.join() for w in workers]

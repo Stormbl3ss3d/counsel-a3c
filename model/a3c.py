@@ -293,7 +293,7 @@ class GCNActorCritic(nn.Module):
 
         return advantages
     
-    def calculate_loss(self, done, last_obs, discount_factor=0.95, trace_decay=0.97):
+    def calculate_loss(self, done, last_obs, discount_factor=0.95, trace_decay=0.97, ent_coef=0.0):
 
         # states = torch.tensor(self.obs, dtype=torch.float).to(self.device)
         # actions = torch.tensor(self.acts, dtype=torch.float).to(self.device)
@@ -329,7 +329,7 @@ class GCNActorCritic(nn.Module):
         dec = torch.as_tensor(self.decisions, dtype=torch.bool).to(self.device)
         value_loss = (returns.detach() - values)**2
         if int(dec.sum()) < 2:   # too few decisions for a normalised advantage: no actor update
-            return values.sum() * 0.0, value_loss
+            return values.sum() * 0.0, value_loss, float("nan")
         adv = advantages[dec]
         normalized_advantages = (adv - adv.mean()) / (adv.std() + 1e-8)
         # FIX bug 2: score actions under the same masked distribution they were sampled from
@@ -337,8 +337,9 @@ class GCNActorCritic(nn.Module):
         logits = self.pi._get_logits(states[dec]).masked_fill(masks[dec] == 0, -1e9)
         pi = Categorical(logits=logits)
         log_prob_actions = pi.log_prob(actions[dec])
-        actor_loss = - (normalized_advantages * log_prob_actions)
-        return actor_loss, value_loss
+        entropy = pi.entropy()   # FIX bug 4: entropy bonus keeps the policy stochastic (ent_coef 0 = upstream)
+        actor_loss = - (normalized_advantages * log_prob_actions) - ent_coef * entropy
+        return actor_loss, value_loss, float(entropy.mean())
     
     # def calculate_loss(self, done):
 
