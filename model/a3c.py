@@ -262,13 +262,11 @@ class GCNActorCritic(nn.Module):
 
         return loss_pi, pi_info
     
-    def calc_R(self, done:bool, last_obs):
+    def calc_R(self, done:bool, last_v:float):
         # FIX bug 1 (companion): self.obs now holds the states actions were CHOSEN in, so obs[-1]
         # is s_{T-1}. Bootstrap from V(s_T), the state AFTER the last action, passed in explicitly.
-        with torch.no_grad():
-            v_last = self.v(torch.as_tensor(np.asarray(last_obs), dtype=torch.float32).to(self.device))
         returns = []
-        R = v_last*(1-int(done))
+        R = last_v*(1-int(done))
 
         for r in self.rews[::-1]:
             R = r + 0.95 * R
@@ -304,13 +302,15 @@ class GCNActorCritic(nn.Module):
         rewards = np.array(self.rews, dtype=np.float32)
         rewards = torch.from_numpy(rewards).to(self.device)
 
-        returns = self.calc_R(done, last_obs)
+        with torch.no_grad():   # FIX: V(s_T) computed once, shared by critic targets and GAE
+            last_v = float(self.v(torch.as_tensor(np.asarray(last_obs), dtype=torch.float32).to(self.device)))
+        returns = self.calc_R(done, last_v)
         returns = torch.tensor(returns).to(self.device)
         values = self.v(states).squeeze()
 
         advantages = []
         advantage = 0
-        next_value = 0
+        next_value = last_v * (1 - int(done))   # FIX: GAE bootstraps from V(s_T), as the critic targets do
 
         for r, v in zip(reversed(rewards), reversed(values)):
             td_error = r + next_value * discount_factor - v
