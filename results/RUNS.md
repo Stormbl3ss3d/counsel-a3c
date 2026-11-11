@@ -72,7 +72,6 @@ Scripts are now in `experiments/inference/` (commit 6cf3462; only output paths c
 ## Evaluations: multi-seed (`tools/eval_harness.py`)
 
 Paired design: every arm runs the same seeds, one fresh env per episode, 4 load-server ports.
-Compare arms seed by seed with `tools/paired.py`. Findings: `claude/eval_fix6_findings_2026-11-11.md` (Project).
 
 | Eval | Code | Image | Conditions | Arms | Output | Result |
 |---|---|---|---|---|---|---|
