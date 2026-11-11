@@ -1,0 +1,145 @@
+{
+ "reference": "fix6-eval-v2",
+ "rows": {
+  "random|1000": {
+   "breaches": 74,
+   "applied": 52,
+   "steps": 452
+  },
+  "random|1001": {
+   "breaches": 126,
+   "applied": 144,
+   "steps": 1213
+  },
+  "random|1002": {
+   "breaches": 96,
+   "applied": 77,
+   "steps": 819
+  },
+  "heur|1000": {
+   "breaches": 51,
+   "applied": 31,
+   "steps": 452
+  },
+  "heur|1001": {
+   "breaches": 90,
+   "applied": 46,
+   "steps": 1213
+  },
+  "heur|1002": {
+   "breaches": 42,
+   "applied": 31,
+   "steps": 819
+  },
+  "const_1x2|1000": {
+   "breaches": 146,
+   "applied": 100,
+   "steps": 452
+  },
+  "const_1x2|1001": {
+   "breaches": 90,
+   "applied": 49,
+   "steps": 1213
+  },
+  "const_1x2|1002": {
+   "breaches": 141,
+   "applied": 91,
+   "steps": 819
+  },
+  "fix5_m900_g|1000": {
+   "breaches": 125,
+   "applied": 173,
+   "steps": 452
+  },
+  "fix5_m900_g|1001": {
+   "breaches": 90,
+   "applied": 49,
+   "steps": 1213
+  },
+  "fix5_m900_g|1002": {
+   "breaches": 183,
+   "applied": 178,
+   "steps": 819
+  },
+  "fix5_m900_s|1000": {
+   "breaches": 78,
+   "applied": 96,
+   "steps": 452
+  },
+  "fix5_m900_s|1001": {
+   "breaches": 90,
+   "applied": 49,
+   "steps": 1213
+  },
+  "fix5_m900_s|1002": {
+   "breaches": 134,
+   "applied": 113,
+   "steps": 819
+  },
+  "e0_m500_g|1000": {
+   "breaches": 146,
+   "applied": 100,
+   "steps": 452
+  },
+  "e0_m500_g|1001": {
+   "breaches": 90,
+   "applied": 49,
+   "steps": 1213
+  },
+  "e0_m500_g|1002": {
+   "breaches": 141,
+   "applied": 91,
+   "steps": 819
+  },
+  "e0_m500_s|1000": {
+   "breaches": 146,
+   "applied": 100,
+   "steps": 452
+  },
+  "e0_m500_s|1001": {
+   "breaches": 90,
+   "applied": 49,
+   "steps": 1213
+  },
+  "e0_m500_s|1002": {
+   "breaches": 141,
+   "applied": 91,
+   "steps": 819
+  },
+  "e1_m1000_g|1000": {
+   "breaches": 146,
+   "applied": 100,
+   "steps": 452
+  },
+  "e1_m1000_g|1001": {
+   "breaches": 90,
+   "applied": 49,
+   "steps": 1213
+  },
+  "e1_m1000_g|1002": {
+   "breaches": 141,
+   "applied": 91,
+   "steps": 819
+  },
+  "e1_m1000_s|1000": {
+   "breaches": 76,
+   "applied": 51,
+   "steps": 452
+  },
+  "e1_m1000_s|1001": {
+   "breaches": 136,
+   "applied": 66,
+   "steps": 1213
+  },
+  "e1_m1000_s|1002": {
+   "breaches": 137,
+   "applied": 85,
+   "steps": 819
+  }
+ },
+ "checkpoint_sha256": {
+  "fix5/model900.pt": "734c6e6efe789200a050446ed9a9679c7fc9b4f4169030d0766bc094bb15a183",
+  "e0/model500.pt": "8a01b044ed1096db74a7155dd55fd426c0b62f0465607655b3433a48df02201f",
+  "e1/model1000.pt": "eb4e593cad87214f2681fc4c6c0362a71f82a8e1f6bbbd4a52d6cb025f8350d5"
+ }
+}

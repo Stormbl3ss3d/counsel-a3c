@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""Fake `docker` for tests/test_integration.py. Never used in real runs.
+
+  docker image inspect IMG --format ...   -> prints a fixed image id
+  docker run ... IMG python3 -m pip freeze -> prints a fake freeze
+  docker run --name N -v SRC:DST:MODE ... IMG bash -c SCRIPT
+        "mounts" = symlinks at DST (DST already sits under COUNSELCTL_CONTAINER_ROOT, so no root needed),
+        then runs SCRIPT locally in its own process group. Fails like docker if container N exists.
+  docker stop N / rm -f N / ps -aq --filter name=^N$
+State (which containers "exist") lives in $FAKE_DOCKER_STATE.
+"""
+import os, signal, subprocess, sys
+
+state = os.environ["FAKE_DOCKER_STATE"]
+os.makedirs(state, exist_ok=True)
+here = os.path.dirname(os.path.abspath(__file__))
+a = sys.argv[1:]
+pidf = lambda n: os.path.join(state, n + ".pid")
+
+if a[:2] == ["image", "inspect"]:
+    if os.environ.get("FAKE_NO_IMAGE"):
+        print("Error: No such image: " + a[2], file=sys.stderr); sys.exit(1)
+    print("sha256:fa4e0000000000000000000000000000000000000000000000000000000000ff"); sys.exit(0)
+if a[0] == "ps":
+    name = a[a.index("--filter") + 1].split("^", 1)[1].rstrip("$")
+    if os.path.exists(pidf(name)):
+        print("c0ffee" + name[:6])
+    sys.exit(0)
+if a[0] in ("stop", "rm"):
+    name = a[-1]
+    if os.path.exists(pidf(name)):
+        pid = int(open(pidf(name)).read() or 0)
+        try:
+            if pid > 1:                       # killpg(0) would signal OUR group (the test runner)
+                os.killpg(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, ValueError):
+            pass
+        if a[0] == "rm":
+            os.remove(pidf(name))
+    sys.exit(0)
+if a[0] != "run":
+    sys.exit(f"fake docker: unsupported {a}")
+if "pip" in a:
+    print("torch==1.13.1+cpu\nnumpy==1.23.5"); sys.exit(0)
+
+mounts, name, i = [], None, 1
+while i < len(a):
+    if a[i] == "-v":
+        mounts.append(a[i + 1].rsplit(":", 2)); i += 2
+    elif a[i] in ("--name", "--user", "-e", "-w", "--shm-size"):
+        if a[i] == "--name":
+            name = a[i + 1]
+        i += 2
+    elif a[i].startswith("-"):
+        i += 1
+    else:
+        break
+if name and os.path.exists(pidf(name)):
+    print(f'docker: Error response from daemon: Conflict. The container name "/{name}" is already in use.',
+          file=sys.stderr)
+    sys.exit(125)
+script = a[-1]
+for src, dst, mode in sorted(mounts, key=lambda m: m[1].count("/")):
+    if os.path.islink(dst):
+        os.unlink(dst)
+    elif os.path.isdir(dst) and not os.listdir(dst):
+        os.rmdir(dst)
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    os.symlink(src, dst)
+env = dict(os.environ, PATH=here + os.pathsep + os.environ["PATH"])
+p = subprocess.Popen(["bash", "-c", script], env=env, start_new_session=True)
+open(pidf(name), "w").write(str(p.pid))
+rc = p.wait()
+try:
+    os.killpg(p.pid, signal.SIGTERM)        # load servers die with the "container"
+except ProcessLookupError:
+    pass
+if not os.environ.get("FAKE_LEAVE_CONTAINER"):  # --rm
+    try:
+        os.remove(pidf(name))
+    except FileNotFoundError:
+        pass
+sys.exit(rc)

@@ -1,0 +1,30 @@
+# Acceptance test (real Docker): a 27-episode subset of fix6-eval-v2 that must reproduce it exactly.
+# Run with: bash tests/acceptance.sh
+name    = "golden-check"
+workers = 4
+
+[conditions]
+slo     = 150
+budget  = [2500, 3600]
+overrun = 0.2
+
+[eval]
+seeds     = "1000-1002"
+modes     = ["greedy", "sample"]
+baselines = ["random", "heur", "const:1x2"]
+reference = ["random"]
+
+[[models]]
+label       = "fix5"
+from        = "a3c/t113-fix5-f5-c3"
+checkpoints = [900]
+
+[[models]]
+label       = "e0"
+from        = "a3c/t113-fix6-f5-c3-ent0"
+checkpoints = [500]
+
+[[models]]
+label       = "e1"
+from        = "a3c/t113-fix6-f5-c3-ent001"
+checkpoints = [1000]

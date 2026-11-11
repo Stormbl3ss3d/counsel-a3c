@@ -1,0 +1,16 @@
+#!/usr/bin/env python3
+"""Fake `uvicorn` for tests: answers every GET with {} on --port, like a load server's /openapi.json."""
+import http.server, sys
+
+port = int(sys.argv[sys.argv.index("--port") + 1])
+
+
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200); self.end_headers(); self.wfile.write(b"{}")
+
+    def log_message(self, *a):
+        pass
+
+
+http.server.ThreadingHTTPServer(("127.0.0.1", port), H).serve_forever()

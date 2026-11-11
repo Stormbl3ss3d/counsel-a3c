@@ -19,8 +19,39 @@ finished episodes are skipped. Changing anything but eval.seeds needs a new name
 
 Runs on the HOST. Stdlib only, Python >= 3.11. Needs git and docker.
 """
-import argparse, hashlib, json, math, os, re, shlex, shutil, statistics as st, subprocess, sys, time, tomllib
+import sys
+if sys.version_info < (3, 11):
+    sys.exit(f"counselctl needs Python >= 3.11 (tomllib); this is {sys.version.split()[0]}")
+import argparse, hashlib, json, math, os, re, shlex, shutil, statistics as st, subprocess, time, tomllib
 from datetime import datetime
+
+# Paths inside the container. COUNSELCTL_CONTAINER_ROOT is a test hook: the fake docker used by
+# tests/ maps "mounts" to symlinks under a temp folder, so the tests run without root. Unset in real use.
+_CR = os.environ.get("COUNSELCTL_CONTAINER_ROOT", "")
+C_CODE, C_JOB, C_RESULTS, C_CKPT = _CR + "/counsel", _CR + "/job", _CR + "/results", _CR + "/ckpt"
+
+
+def _read(p):
+    with open(p) as f:
+        return f.read()
+
+
+def _write(p, txt):
+    with open(p, "w") as f:
+        f.write(txt)
+
+
+def _append(p, txt):
+    with open(p, "a") as f:
+        f.write(txt)
+
+
+def _load(p):
+    return json.loads(_read(p))
+
+
+def _dump(obj, p):
+    _write(p, json.dumps(obj, indent=1))
 
 # ================================================================= spec
 
@@ -115,8 +146,14 @@ def validate(s):
 
 
 def load_spec(path):
-    with open(path, "rb") as f:
-        return validate(merge(tomllib.load(f)))
+    try:
+        with open(path, "rb") as f:
+            user = tomllib.load(f)
+    except FileNotFoundError:
+        raise SpecError(f"settings file not found: {path}")
+    except tomllib.TOMLDecodeError as ex:
+        raise SpecError(f"{path} is not valid TOML: {ex}")
+    return validate(merge(user))
 
 
 def freq_of(c):
@@ -166,7 +203,7 @@ def can_inhibit_sleep():
 def load_server_script(workers, log):
     last = 8000 + workers - 1
     return f"""set -e
-cd /counsel/load-gen
+cd {C_CODE}/load-gen
 for p in $(seq 8000 {last}); do
   uvicorn loadserver:app --port $p --log-level warning >> {log} 2>&1 &
 done
@@ -179,7 +216,7 @@ for p in $(seq 8000 {last}); do
   done
 done
 echo "COUNSELCTL: {workers} load servers up (8000-{last})"
-cd /counsel
+cd {C_CODE}
 """
 
 
@@ -189,7 +226,7 @@ def docker_cmd(cname, image, mounts, script, why):
            "-e", "HOME=/tmp", "-e", "OMP_NUM_THREADS=1", "--shm-size=1g"]
     for src, dst, mode in mounts:
         cmd += ["-v", f"{src}:{dst}:{mode}"]
-    cmd += ["-w", "/counsel", image, "bash", "-c", script]
+    cmd += ["-w", C_CODE, image, "bash", "-c", script]
     if can_inhibit_sleep():
         cmd = ["systemd-inhibit", "--what=sleep:idle", "--who=counselctl", f"--why={why}"] + cmd
     return cmd
@@ -276,7 +313,7 @@ class Watchdog:
 
 
 def check_code_supports(code_dir, ref, ent):
-    src = open(os.path.join(code_dir, "traina3c.py")).read()
+    src = _read(os.path.join(code_dir, "traina3c.py"))
     errs = []
     if '"--slo"' not in src:
         errs.append(f"code {ref} has no --slo/--freq/--budget/--overrun (needs fix5 or later)")
@@ -295,15 +332,25 @@ def train_dir(repo, s, m):
 
 
 def train_state(repo, s, m):
-    """'done' (reusable), 'failed', or 'todo'."""
+    """'done' (reusable), 'failed' (a real result: excluded), or 'todo' (never ran, or was interrupted)."""
     d = train_dir(repo, s, m)
     tj = os.path.join(d, "train.json")
     if not os.path.exists(tj):
-        return ("failed", "folder exists without train.json (interrupted?)") if os.path.exists(d) else ("todo", "")
-    rec = json.load(open(tj))
+        return ("todo", "interrupted before it finished: retraining") if os.path.exists(d) else ("todo", "")
+    rec = _load(tj)
     if rec.get("exit_code") == 0 and rec.get("checkpoints"):
         return "done", f"{len(rec['checkpoints'])} checkpoints"
+    if str(rec.get("stopped_by", "")).startswith("user"):
+        return "todo", "stopped with Ctrl-C last time: retraining"
     return "failed", rec.get("stopped_by") or f"exit code {rec.get('exit_code')}"
+
+
+def remove_run_dir(repo, d):
+    code = os.path.join(d, "code")
+    if os.path.exists(code):
+        sh(["git", "worktree", "remove", "--force", code], repo)
+    shutil.rmtree(d, ignore_errors=True)
+    sh(["git", "worktree", "prune"], repo)
 
 
 def run_training(repo, s, m, poll, image_id, pip):
@@ -312,6 +359,8 @@ def run_training(repo, s, m, poll, image_id, pip):
     d = train_dir(repo, s, m)
     commit = resolve_commit(repo, t["code"])
     code, out = os.path.join(d, "code"), os.path.join(d, "out")
+    if os.path.exists(d):                     # interrupted earlier (train_state said 'todo'): start clean
+        remove_run_dir(repo, d)
     os.makedirs(d)
     make_worktree(repo, commit, code)
     has_ent = check_code_supports(code, t["code"], t["ent"])
@@ -320,13 +369,13 @@ def run_training(repo, s, m, poll, image_id, pip):
             "-ncp", str(c["chain"]), "-nw", str(s["workers"]), "--slo", str(c["slo"]),
             "--freq", str(freq_of(c)), "--budget", str(c["budget"][0]), str(c["budget"][1]),
             "--overrun", str(c["overrun"])] + (["--ent", str(t["ent"])] if has_ent else [])
-    script = load_server_script(s["workers"], "/counsel/a3c/loadservers.log") + \
+    script = load_server_script(s["workers"], f"{C_CODE}/a3c/loadservers.log") + \
         "exec python3 -u traina3c.py " + " ".join(shlex.quote(a) for a in args) + "\n"
     cname = f"counsel-train-{run}"
-    cmd = docker_cmd(cname, s["image"], [(code, "/counsel", "ro"), (out, "/counsel/a3c", "rw")], script,
+    cmd = docker_cmd(cname, s["image"], [(code, C_CODE, "ro"), (out, f"{C_CODE}/a3c", "rw")], script,
                      f"training {run}")
-    json.dump({"code_ref": t["code"], "code_commit": commit, "image_id": image_id, "pip_freeze": pip,
-               "train": t, "conditions": c, "cmd": cmd}, open(os.path.join(d, "provenance.json"), "w"), indent=1)
+    _dump({"code_ref": t["code"], "code_commit": commit, "image_id": image_id, "pip_freeze": pip,
+           "train": t, "conditions": c, "cmd": cmd}, os.path.join(d, "provenance.json"))
 
     order = loss_order(repo, commit)
     wd = Watchdog(s["watch"], order) if s["watch"]["enabled"] else None
@@ -340,6 +389,7 @@ def run_training(repo, s, m, poll, image_id, pip):
         print(f"  stopping {cname}: {reason}", flush=True)
         sh(["docker", "stop", cname]); proc.wait(); rec["stopped_by"] = reason
 
+    clear_stale_container(cname)
     with open(log_path, "w") as log:
         proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)
         try:
@@ -375,7 +425,7 @@ def run_training(repo, s, m, poll, image_id, pip):
             rec |= {"end": datetime.now().isoformat(timespec="seconds"), "wall_s": round(time.time() - t0, 1),
                     "exit_code": proc.returncode, "watchdog_events": events,
                     "checkpoints": sorted(os.listdir(mdir)) if os.path.isdir(mdir) else []}
-            json.dump(rec, open(os.path.join(d, "train.json"), "w"), indent=1)
+            _dump(rec, os.path.join(d, "train.json"))
     return rec
 
 
@@ -403,7 +453,7 @@ def checkpoints_of(repo, s, m):
 def train_conditions(repo, s, m):
     _, run_root = model_dir(repo, s, m)
     p = os.path.join(run_root, "train_conditions.json")
-    return json.load(open(p)) if os.path.exists(p) else None
+    return _load(p) if os.path.exists(p) else None
 
 
 def condition_mismatch(tc, c):
@@ -423,7 +473,9 @@ EVAL_DRIVER = r'''
 """Written by counselctl.py. Runs eval_harness.run_episode for every (arm, seed) with conditions from the
 spec, one process per load-server port, resumable. Uses the eval code mounted at /counsel unchanged."""
 import inspect, json, os, sys, time, multiprocessing as mp
-sys.path[:0] = ["/counsel", "/counsel/tools"]
+with open(sys.argv[1]) as _f:
+    cfg = json.load(_f)
+sys.path[:0] = [cfg["code"], cfg["code"] + "/tools"]
 import eval_harness as eh
 
 
@@ -447,12 +499,14 @@ def worker(port, jobs, results, cfg):
 
 
 def main():
-    cfg = json.load(open(sys.argv[1]))
     sig = list(inspect.signature(eh.run_episode).parameters)[:7]
     if sig != ["arm", "seed", "port", "nconf", "ncomp", "R", "log_dir"]:
         sys.exit(f"COUNSELCTL-EVAL: eval_harness.run_episode signature changed: {sig}")
     path = cfg["episodes"]
-    old = [json.loads(l) for l in open(path)] if os.path.exists(path) else []
+    old = []
+    if os.path.exists(path):
+        with open(path) as f:
+            old = [json.loads(l) for l in f if l.strip()]
     have = {(r["arm"], r["seed"]) for r in old if "error" not in r}
     todo = [(n, s, sd) for sd in cfg["seeds"] for n, s in cfg["arms"] if (n, sd) not in have]
     total = len(todo)
@@ -489,7 +543,7 @@ def arms_for(repo, s, plan):
     for m, mdir, want in plan:
         for ep in want:
             for mode in s["eval"]["modes"]:
-                arms.append((f"{m['label']}_m{ep}_{mode[0]}", f"torch:/ckpt/{m['label']}/model{ep}.pt:{mode}",
+                arms.append((f"{m['label']}_m{ep}_{mode[0]}", f"torch:{C_CKPT}/{m['label']}/model{ep}.pt:{mode}",
                              os.path.join(mdir, f"model{ep}.pt")))
     return arms
 
@@ -499,22 +553,25 @@ def run_eval(repo, s, job, out, arms, mounts_ckpt, poll):
     seeds = parse_seeds(s["eval"]["seeds"])
     ports = [8000 + i for i in range(s["workers"])]
     cfg = {"arms": [[n, sp] for n, sp, _ in arms], "seeds": seeds, "ports": ports,
-           "nconf": c["flavors"], "ncomp": c["chain"], "envlogs": "/job/envlogs",
-           "episodes": "/results/episodes.jsonl",
+           "nconf": c["flavors"], "ncomp": c["chain"], "envlogs": f"{C_JOB}/envlogs", "code": C_CODE,
+           "episodes": f"{C_RESULTS}/episodes.jsonl",
            "R": {"slo": c["slo"], "freq": freq_of(c), "knob": c["knob"], "budget": c["budget"], "slack": c["overrun"]}}
-    json.dump(cfg, open(os.path.join(job, "eval_config.json"), "w"), indent=1)
-    open(os.path.join(job, "eval_driver.py"), "w").write(EVAL_DRIVER)
-    script = load_server_script(s["workers"], "/job/loadservers.log") + \
-        "exec python3 -u /job/eval_driver.py /job/eval_config.json\n"
-    mounts = [(os.path.join(job, "code"), "/counsel", "ro"), (job, "/job", "rw"), (out, "/results", "rw")] + mounts_ckpt
+    _dump(cfg, os.path.join(job, "eval_config.json"))
+    _write(os.path.join(job, "eval_driver.py"), EVAL_DRIVER)
+    script = load_server_script(s["workers"], f"{C_JOB}/loadservers.log") + \
+        f"exec python3 -u {C_JOB}/eval_driver.py {C_JOB}/eval_config.json\n"
+    mounts = [(os.path.join(job, "code"), C_CODE, "ro"), (job, C_JOB, "rw"), (out, C_RESULTS, "rw")] + mounts_ckpt
     cname = f"counsel-eval-{s['name']}"
     cmd = docker_cmd(cname, s["image"], mounts, script, f"evaluating {s['name']}")
     log_path = os.path.join(job, "eval.log")
     todo = len(seeds) * len(arms)
     print(f"  evaluating {len(arms)} arms x {len(seeds)} seeds = {todo} episodes on {len(ports)} workers; "
           f"log {log_path}")
-    t0, last, shown, started = time.time(), "", "", None
+    clear_stale_container(cname)
+    stall = 60 * s["watch"]["stall_min"]
+    t0, last, shown, t_up, last_progress, reason = time.time(), "", "", None, time.time(), None
     offset = os.path.getsize(log_path) if os.path.exists(log_path) else 0     # resumed runs append to the log
+    log_start = offset
     with open(log_path, "a") as log:
         proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)
         try:
@@ -525,18 +582,49 @@ def run_eval(repo, s, job, out, arms, mounts_ckpt, poll):
                     if not line.startswith("COUNSELCTL"):
                         continue
                     last = line.split(": ", 1)[-1]
+                    if "episodes to run" in line:               # always show what a (re)run will do
+                        print(f"  {last}", flush=True)
+                    if "load servers up" in line:
+                        t_up = time.time()
                     if (x := re.match(r"COUNSELCTL-EVAL: (\d+)/(\d+) (.*)", line)):
                         k, n, what = int(x.group(1)), int(x.group(2)), x.group(3)
-                        started = started or (time.time() - 1e-3, k - 1)
-                        rate = (k - started[1]) / (time.time() - started[0])
+                        last_progress = time.time()
+                        rate = k / max(1e-6, time.time() - (t_up or t0))   # episodes/s since the servers came up
                         last = f"{k}/{n} episodes, ETA {fmt_dt((n - k) / rate)}  (last: {what})"
                 if last and last != shown:
                     print(f"  [{fmt_dt(time.time() - t0)}] {last}", flush=True); shown = last
+                if time.time() - last_progress > stall:
+                    reason = f"no episode finished for {s['watch']['stall_min']} min (stalled)"
+                    print(f"  stopping {cname}: {reason}; re-run the same command to resume", flush=True)
+                    sh(["docker", "stop", cname]); proc.wait()
+                    break
         except KeyboardInterrupt:
             print(f"\n  stopping {cname} (re-run the same command to resume)")
             sh(["docker", "stop", cname]); proc.wait()
             raise
-    return proc.returncode
+    rc = proc.returncode
+    if rc != 0 and not reason:
+        tail = log_tail(log_path, log_start, 15)
+        reason = f"eval container exited with code {rc}"
+        print(f"  {reason}; last lines of {os.path.basename(log_path)}:\n" + "\n".join("    " + l for l in tail))
+    return rc, reason
+
+
+def log_tail(path, start, n):
+    try:
+        with open(path, "rb") as f:
+            f.seek(start); lines = f.read().decode(errors="replace").splitlines()
+        return lines[-n:]
+    except OSError:
+        return []
+
+
+def clear_stale_container(cname):
+    """A container left over from a crash (same name) would make `docker run --name` fail."""
+    ok, out = sh(["docker", "ps", "-aq", "--filter", f"name=^{cname}$"])
+    if ok and out.strip():
+        print(f"  removing leftover container {cname} from an earlier run")
+        sh(["docker", "rm", "-f", cname])
 
 
 # ================================================================= report (host, stdlib)
@@ -556,12 +644,16 @@ def ci(xs):
 
 
 def load_rows(path):
-    rows = [json.loads(l) for l in open(path)] if os.path.exists(path) else []
+    rows = [json.loads(l) for l in _read(path).splitlines() if l.strip()] if os.path.exists(path) else []
     ok, seen = [], set()
     for r in rows:                     # first successful row per (arm, seed); duplicates can't double-count
         if "error" not in r and (r["arm"], r["seed"]) not in seen:
             ok.append(r); seen.add((r["arm"], r["seed"]))
-    bad = [r for r in rows if "error" in r]
+    bad, bseen = [], set()
+    for r in rows:
+        k = (r["arm"], r["seed"])
+        if "error" in r and k not in seen and k not in bseen:
+            bad.append(r); bseen.add(k)
     done = seen
     bad = [r for r in bad if (r["arm"], r["seed"]) not in done]      # a failure later retried successfully
     return ok, bad
@@ -610,7 +702,7 @@ def svg_plot(s, plan, by, path):
         o += [f'<circle cx="{px(x):.1f}" cy="{py(y):.1f}" r="2.5" fill="{col}"/>' for x, y in pts]
         o.append(f'<text x="{L + 8}" y="{legend_y + 13 * i}" fill="{col}">{"━" if greedy else "─"} {n}</text>')
     o.append("</svg>")
-    open(path, "w").write("\n".join(o))
+    _write(path, "\n".join(o))
     return True
 
 
@@ -629,7 +721,12 @@ def build_report(repo, s, out, plan, prov, train_notes, warnings):
         v = [x[k] for x in by[arm]["rows"].values() if x.get(k) is not None]
         return st.mean(v) if v else float("nan")
 
-    order = sorted(by, key=lambda a: st.mean(by[a]["breaches"].values()))
+    # ties broken by name: worker completion order must not change the report between identical runs
+    order = sorted(by, key=lambda a: (st.mean(by[a]["breaches"].values()), a))
+    fail_by = {}
+    for r in bad:
+        if r["seed"] in seeds:
+            fail_by[r["arm"]] = fail_by.get(r["arm"], 0) + 1
     # behaviour fingerprint per seed: identical on every seed = the same policy in practice
     fp = {a: {sd: (r["breaches"], r["applied"], r["cpu_mean"], r["mem_mean"]) for sd, r in by[a]["rows"].items()}
           for a in by}
@@ -665,15 +762,23 @@ def build_report(repo, s, out, plan, prov, train_notes, warnings):
         L += ["## Warnings", ""] + [f"- {w}" for w in warnings] + [""]
 
     L += ["## Results (sorted by mean breaches; lower is better)", "",
-          "| arm | n | breaches | 95% CI | reward/step | applied | util | overrun steps | note |",
-          "|---|---|---|---|---|---|---|---|---|"]
+          "| arm | n | failed | breaches | 95% CI | reward/step | applied | util | overrun steps | note |",
+          "|---|---|---|---|---|---|---|---|---|---|"]
     for a in order:
         b = list(by[a]["breaches"].values())
         h = ci(b)
         note = "baseline" if by[a]["baseline"] else (f"= {same_as[a]} on every seed" if a in same_as else "")
-        L.append(f"| {a} | {len(b)} | {st.mean(b):.1f} | ±{h:.1f} | {mean(a, 'reward_per_step'):.3f} | "
-                 f"{mean(a, 'applied'):.1f} | {mean(a, 'util_mean'):.3f} | {mean(a, 'overrun_steps'):.1f} | {note} |")
+        L.append(f"| {a} | {len(b)} | {fail_by.get(a, 0)} | {st.mean(b):.1f} | ±{h:.1f} | "
+                 f"{mean(a, 'reward_per_step'):.3f} | {mean(a, 'applied'):.1f} | {mean(a, 'util_mean'):.3f} | "
+                 f"{mean(a, 'overrun_steps'):.1f} | {note} |")
     L.append("")
+    dead = sorted(set(fail_by) - set(by))
+    if dead:                          # every episode of these arms failed: they are not in the table above
+        L += ["## Arms with no successful episode", "", "| arm | failed | first error |", "|---|---|---|"]
+        for a in dead:
+            err = next(r["error"] for r in bad if r["arm"] == a)
+            L.append(f"| {a} | {fail_by[a]} | `{err[:160]}` |")
+        L.append("")
     L += ["CI = 95% t-interval of the mean over seeds. `= X on every seed` means breaches, actions applied, "
           "and mean CPU/memory match baseline X exactly on every seed: in practice the same policy.", ""]
 
@@ -721,14 +826,14 @@ def build_report(repo, s, out, plan, prov, train_notes, warnings):
 
     L += ["## Provenance", "", "```", json.dumps({k: v for k, v in prov.items() if k != "pip_freeze"}, indent=1),
           "```", "Full `pip freeze` of the image is in `provenance.json`.", ""]
-    open(os.path.join(out, "report.md"), "w").write("\n".join(L))
+    _write(os.path.join(out, "report.md"), "\n".join(L))
 
     csv = ["arm,n,breaches_mean,breaches_ci95,reward_per_step,applied,util_mean,overrun_steps,same_as"]
     for a in order:
         b = list(by[a]["breaches"].values())
         csv.append(f"{a},{len(b)},{st.mean(b):.4g},{ci(b):.4g},{mean(a, 'reward_per_step'):.4g},"
                    f"{mean(a, 'applied'):.4g},{mean(a, 'util_mean'):.4g},{mean(a, 'overrun_steps'):.4g},{same_as.get(a, '')}")
-    open(os.path.join(out, "summary.csv"), "w").write("\n".join(csv) + "\n")
+    _write(os.path.join(out, "summary.csv"), "\n".join(csv) + "\n")
     return order, by, bad
 
 
@@ -736,7 +841,7 @@ def append_runs_md(repo, s, out, prov, order, by, bad):
     p = os.path.join(repo, "results", "RUNS.md")
     if not os.path.exists(p):
         return "results/RUNS.md not found: not updated"
-    txt = open(p).read()
+    txt = _read(p)
     head = "## Evaluations: counselctl"
     rel = os.path.relpath(out, repo)
     best = next((a for a in order if not by[a]["baseline"]), "-")
@@ -763,7 +868,7 @@ def append_runs_md(repo, s, out, prov, order, by, bad):
         while k > start and not lines[k - 1].startswith("|"):
             k -= 1
         lines.insert(k, row)
-    open(p, "w").write("\n".join(lines) + "\n")
+    _write(p, "\n".join(lines) + "\n")
     return f"results/RUNS.md: row for {s['name']} written (commit it)"
 
 
@@ -782,7 +887,7 @@ def cmd_run(a):
     if os.path.exists(out) and not os.path.exists(resolved_p):
         raise SpecError(f"{out} exists but was not made by counselctl: pick another name")
     if os.path.exists(resolved_p):
-        old = json.load(open(resolved_p))
+        old = _load(resolved_p)
         strip = lambda x: {**x, "eval": {**x["eval"], "seeds": None}}
         if strip(old) != strip(s):
             raise SpecError(f"{s['name']} already exists with different settings (only eval.seeds may change "
@@ -790,17 +895,32 @@ def cmd_run(a):
         print(f"resuming {s['name']}")
 
     # --- 2. code, image, models
-    _, tool_describe = sh(["git", "describe", "--tags", "--always", "--dirty"], repo)
     eval_commit = resolve_commit(repo, "HEAD")
+    # describes the commit the eval code comes from (a worktree of it), so no "-dirty": uncommitted eval-code
+    # edits get their own warning below, and an edited RUNS.md does not change what ran
+    _, tool_describe = sh(["git", "describe", "--tags", "--always", eval_commit or "HEAD"], repo)
     if not eval_commit:
         problems.append(f"{repo} is not a git repository")
-    _, dirty = sh(["git", "status", "--porcelain", "--untracked-files=no", "--", "tools", "model", "load-gen"], repo)
+    # counselctl.py itself runs on the host and is not eval code; its own hash is in provenance.json
+    _, dirty = sh(["git", "status", "--porcelain", "--untracked-files=no", "--", "tools", "model", "load-gen",
+                   ":(exclude)tools/counselctl.py"], repo)
     if dirty:
         warnings.append(f"uncommitted changes in tools/model/load-gen are NOT used (eval code comes from commit "
                         f"{(eval_commit or '?')[:7]}): {dirty.splitlines()}")
     iid, pip, err = image_info(s["image"])
     if err:
         problems.append(err)
+    # const:CxM baselines must name a real shape, or every episode of that arm fails at run time
+    nf = s["conditions"]["flavors"]
+    ok, fj = sh(["git", "show", f"HEAD:model/configs/flavors{nf}.json"], repo)
+    if ok:
+        shapes = {tuple(v) for k, v in json.loads(fj).items() if k != "none"}
+        for b in s["eval"]["baselines"]:
+            if (x := re.fullmatch(r"const:(\d+)x(\d+)", b)) and tuple(map(int, x.groups())) not in shapes:
+                problems.append(f"baseline {b}: no such shape in flavors{nf}.json; have "
+                                + ", ".join(f"const:{c}x{m}" for c, m in sorted(shapes)))
+    else:
+        problems.append(f"model/configs/flavors{nf}.json not found at HEAD")
 
     plan, train_notes, to_train = [], {}, []
     for m in s["models"]:
@@ -821,7 +941,7 @@ def cmd_run(a):
                 continue
             else:
                 to_train.append(m)
-                train_notes[m["label"]] = "trained in this run"
+                train_notes[m["label"]] = "trained in this run" + (f" ({why})" if why else "")
             plan.append(m)
             continue
         mdir, have, want = checkpoints_of(repo, s, m)
@@ -858,13 +978,13 @@ def cmd_run(a):
     os.makedirs(job, exist_ok=True)
     lock = os.path.join(job, "running.pid")          # one run per name at a time: both would append to one file
     if os.path.exists(lock):
-        pid = int(open(lock).read() or 0)
+        pid = int(_read(lock) or 0)
         try:
             os.kill(pid, 0)
             raise SpecError(f"{s['name']} is already running (pid {pid}); wait for it or stop it first")
         except ProcessLookupError:
             pass                                      # stale lock from a crashed run
-    open(lock, "w").write(str(os.getpid()))
+    _write(lock, str(os.getpid()))
     try:
         return _run_locked(a, repo, spec_path, s, out, job, resolved_p, plan, to_train, train_notes,
                            warnings, iid, pip, eval_commit, tool_describe)
@@ -874,16 +994,24 @@ def cmd_run(a):
 
 def _run_locked(a, repo, spec_path, s, out, job, resolved_p, plan, to_train, train_notes,
                 warnings, iid, pip, eval_commit, tool_describe):
-    json.dump(s, open(resolved_p, "w"), indent=1)
+    _dump(s, resolved_p)
     shutil.copy(spec_path, os.path.join(out, "spec.toml"))
 
     # --- 4. train what needs training
+    failed_training = []
     for m in to_train:
         rec = run_training(repo, s, m, a.poll, iid, pip)
         if rec.get("exit_code") != 0 or not rec.get("checkpoints"):
             why = rec.get("stopped_by") or f"exit code {rec.get('exit_code')}"
+            if not rec.get("checkpoints") and not rec.get("stopped_by"):
+                why += ", no checkpoints written"
             train_notes[m["label"]] = f"training failed: {why}; excluded"
-            warnings.append(f"{m['label']}: training failed ({why})")
+            warnings.append(f"{m['label']}: training failed ({why}); see "
+                            f"{os.path.relpath(train_dir(repo, s, m), repo)}/train.log")
+            tail = log_tail(os.path.join(train_dir(repo, s, m), "train.log"), 0, 12)
+            print(f"  TRAINING FAILED for {m['label']}: {why}; it is excluded from the eval. Last lines of train.log:\n"
+                  + "\n".join("    " + l for l in tail), flush=True)
+            failed_training.append(m["label"])
             plan.remove(m)
         else:
             train_notes[m["label"]] = f"trained in this run ({fmt_dt(rec['wall_s'])}, {len(rec['checkpoints'])} ckpts)"
@@ -899,7 +1027,7 @@ def _run_locked(a, repo, spec_path, s, out, job, resolved_p, plan, to_train, tra
         if (mm := condition_mismatch(train_conditions(repo, s, m), s["conditions"])):
             warnings.append(f"{m['label']}: eval conditions differ from training: {mm}")
         plan3.append((m, mdir, want))
-        mounts.append((mdir, f"/ckpt/{m['label']}", "ro"))
+        mounts.append((mdir, f"{C_CKPT}/{m['label']}", "ro"))
         for e in want:
             ckpts[f"{m['label']}/model{e}.pt"] = sha256(os.path.join(mdir, f"model{e}.pt"))
     arms = arms_for(repo, s, plan3)
@@ -916,7 +1044,7 @@ def _run_locked(a, repo, spec_path, s, out, job, resolved_p, plan, to_train, tra
             "checkpoint_sha256": ckpts, "pip_freeze": pip}
     old_prov = os.path.join(out, "provenance.json")
     if os.path.exists(old_prov):
-        prev = json.load(open(old_prov))
+        prev = _load(old_prov)
         for k in ("eval_commit", "image_id"):
             if prev.get(k) and prev[k] != prov[k]:
                 warnings.append(f"resumed with a different {k} ({prev[k][:12]} before, {prov[k][:12]} now): "
@@ -924,12 +1052,12 @@ def _run_locked(a, repo, spec_path, s, out, job, resolved_p, plan, to_train, tra
         changed = [k for k, v in ckpts.items() if prev.get("checkpoint_sha256", {}).get(k, v) != v]
         if changed:
             warnings.append(f"checkpoint files changed since the last run: {changed}")
-    json.dump(prov, open(old_prov, "w"), indent=1)
+    _dump(prov, old_prov)
 
     # --- 7. evaluate, then report
-    rc = run_eval(repo, s, job, out, arms, mounts, a.poll)
+    rc, reason = run_eval(repo, s, job, out, arms, mounts, a.poll)
     if rc != 0:
-        warnings.append(f"eval container exited with code {rc}; see {os.path.relpath(job, repo)}/eval.log")
+        warnings.append(f"{reason}; see {os.path.relpath(job, repo)}/eval.log. Re-run the same command to resume.")
     order, by, bad = build_report(repo, s, out, plan3, prov, train_notes, warnings)
     note = append_runs_md(repo, s, out, prov, order, by, bad) if not a.no_runs_md else "RUNS.md not updated"
     print(f"\nreport: {os.path.relpath(os.path.join(out, 'report.md'), repo)}\n{note}")
@@ -937,7 +1065,9 @@ def _run_locked(a, repo, spec_path, s, out, job, resolved_p, plan, to_train, tra
     if best:
         print(f"best checkpoint arm {best}: {st.mean(by[best]['breaches'].values()):.1f} breaches; "
               + ", ".join(f"{b} {st.mean(by[b]['breaches'].values()):.1f}" for b in order if by[b]["baseline"]))
-    return 0 if rc == 0 and not bad else 1
+    if failed_training:
+        print(f"training failed for: {', '.join(failed_training)} (see the report's Warnings)")
+    return 0 if rc == 0 and not bad and not failed_training else 1
 
 
 def main(argv=None):
