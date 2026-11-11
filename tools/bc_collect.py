@@ -141,12 +141,29 @@ def sha256(path):
     return h.hexdigest()
 
 
-def git_commit():
+def git_commit(repo="."):
+    """Short commit hash. Tries the git binary, then reads .git directly: the counsel:t113
+    image has no git, but the repo (and its .git) is bind-mounted at /counsel."""
     try:
         return subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True,
-                              text=True, check=True).stdout.strip()
+                              text=True, check=True, cwd=repo).stdout.strip()
     except Exception:
-        return None                              # git may be absent in the container
+        pass
+    try:
+        gd = os.path.join(repo, ".git")
+        head = open(os.path.join(gd, "HEAD")).read().strip()
+        if not head.startswith("ref: "):
+            return head[:7]                      # detached HEAD
+        ref = head[5:]
+        loose = os.path.join(gd, ref)
+        if os.path.exists(loose):
+            return open(loose).read().strip()[:7]
+        for line in open(os.path.join(gd, "packed-refs")):
+            if line.strip().endswith(" " + ref):
+                return line.split()[0][:7]
+    except Exception:
+        pass
+    return None
 
 
 def teacher_checkpoint(spec):
