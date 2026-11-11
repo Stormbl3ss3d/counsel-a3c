@@ -1,0 +1,52 @@
+{
+ "name": "slm-zeroshot-l1b",
+ "image": "counsel:t113",
+ "workers": 4,
+ "conditions": {
+  "slo": 150,
+  "freq": 0,
+  "budget": [
+   2500,
+   3600
+  ],
+  "overrun": 0.2,
+  "knob": 0.05,
+  "flavors": 5,
+  "chain": 3
+ },
+ "eval": {
+  "seeds": "1000-1009",
+  "modes": [
+   "greedy"
+  ],
+  "baselines": [
+   "noop",
+   "random",
+   "heur",
+   "const:1x2"
+  ],
+  "reference": [
+   "random",
+   "heur"
+  ]
+ },
+ "vllm": {
+  "base": "http://localhost:9000"
+ },
+ "watch": {
+  "enabled": true,
+  "actor_limit": 10000.0,
+  "collapse_ent": 0.001,
+  "window": 50,
+  "on_collapse": "warn",
+  "stall_min": 10
+ },
+ "models": [],
+ "slm": [
+  {
+   "label": "zsl1b",
+   "model": "unsloth/Llama-3.2-1B-Instruct",
+   "prompt": "operator"
+  }
+ ]
+}
