@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="420" font-family="sans-serif" font-size="11">
+<rect width="760" height="420" fill="white"/>
+<text x="60" y="13" font-size="12">slm-bcfix5: mean SLO breaches per episode (10 seeds)</text>
+<line x1="60" x2="590" y1="375.0" y2="375.0" stroke="#eee"/><text x="54" y="379.0" text-anchor="end">0</text>
+<line x1="60" x2="590" y1="304.0" y2="304.0" stroke="#eee"/><text x="54" y="308.0" text-anchor="end">84</text>
+<line x1="60" x2="590" y1="233.0" y2="233.0" stroke="#eee"/><text x="54" y="237.0" text-anchor="end">167</text>
+<line x1="60" x2="590" y1="162.0" y2="162.0" stroke="#eee"/><text x="54" y="166.0" text-anchor="end">251</text>
+<line x1="60" x2="590" y1="91.0" y2="91.0" stroke="#eee"/><text x="54" y="95.0" text-anchor="end">335</text>
+<line x1="60" x2="590" y1="20.0" y2="20.0" stroke="#eee"/><text x="54" y="24.0" text-anchor="end">418</text>
+<text x="60.0" y="390" text-anchor="middle">900</text>
+<text x="325.0" y="412" text-anchor="middle">checkpoint (training episode)</text>
+<line x1="60" x2="590" y1="334.3" y2="334.3" stroke="#888" stroke-dasharray="4 3"/><text x="594" y="338.3" fill="#666">heur 48</text>
+<line x1="60" x2="590" y1="284.8" y2="284.8" stroke="#888" stroke-dasharray="4 3"/><text x="594" y="288.8" fill="#666">random 106</text>
+<line x1="60" x2="590" y1="249.6" y2="249.6" stroke="#888" stroke-dasharray="4 3"/><text x="594" y="253.6" fill="#666">const_1x2 148</text>
+<line x1="60" x2="590" y1="46.3" y2="46.3" stroke="#888" stroke-dasharray="4 3"/><text x="594" y="50.3" fill="#666">noop 387</text>
+<polyline points="60.0,240.9" fill="none" stroke="#2563eb" stroke-width="2" opacity="1"/>
+<circle cx="60.0" cy="240.9" r="2.5" fill="#2563eb"/>
+<text x="68" y="30" fill="#2563eb">━ fix5 greedy</text>
+<polyline points="60.0,285.5" fill="none" stroke="#2563eb" stroke-width="1.2" opacity="0.65" stroke-dasharray="1 0"/>
+<circle cx="60.0" cy="285.5" r="2.5" fill="#2563eb"/>
+<text x="68" y="43" fill="#2563eb">─ fix5 sample</text>
+</svg>

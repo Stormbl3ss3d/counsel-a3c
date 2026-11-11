@@ -90,3 +90,4 @@ Rows written by `tools/counselctl.py run`; the report has the full table.
 | fix6-eval-v2 | 83a5ce0 | 2fa7ed7e051d | SLO 150, budget [2500, 3600], seeds 1000-1009 | fix5, e0, e1 | results/eval/fix6-eval-v2/report.md | [measured] best ckpt fix5_m900_s 105.4; random 106.3; heur 47.9; 0 failed |
 | slm-bcheur100 | 7388aaf | 2fa7ed7e051d | SLO 150, budget [2500, 3600], seeds 1000-1009 | fix5 | results/eval/slm-bcheur100/report.md | [measured] best ckpt slm_bcheur 40.7; random 106.3; heur 47.9; 0 failed |
 | slm-zeroshot-l1b | 7388aaf | 2fa7ed7e051d | SLO 150, budget [2500, 3600], seeds 1000-1009 |  | results/eval/slm-zeroshot-l1b/report.md | [measured] best ckpt slm_zsl1b 163.2; random 106.3; heur 47.9; 0 failed |
+| slm-bcfix5 | 449b998 | 2fa7ed7e051d | SLO 150, budget [2500, 3600], seeds 1000-1009 | fix5 | results/eval/slm-bcfix5/report.md | [measured] best ckpt fix5_m900_s 105.4; random 106.3; heur 47.9; 0 failed |
