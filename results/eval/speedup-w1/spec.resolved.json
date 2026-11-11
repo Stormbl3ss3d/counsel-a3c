@@ -1,0 +1,53 @@
+{
+ "name": "speedup-w1",
+ "image": "counsel:t113",
+ "workers": 1,
+ "conditions": {
+  "slo": 150,
+  "freq": 0,
+  "budget": [
+   2500,
+   3600
+  ],
+  "overrun": 0.2,
+  "knob": 0.05,
+  "flavors": 5,
+  "chain": 3
+ },
+ "eval": {
+  "seeds": "1000-1029",
+  "modes": [
+   "greedy",
+   "sample"
+  ],
+  "baselines": [
+   "random",
+   "heur"
+  ],
+  "reference": [
+   "random"
+  ]
+ },
+ "vllm": {
+  "base": "http://localhost:9000"
+ },
+ "watch": {
+  "enabled": true,
+  "actor_limit": 10000.0,
+  "collapse_ent": 0.001,
+  "window": 50,
+  "on_collapse": "warn",
+  "stall_min": 10
+ },
+ "models": [
+  {
+   "label": "fix5",
+   "from": "a3c/t113-fix5-f5-c3",
+   "train": null,
+   "checkpoints": [
+    900
+   ]
+  }
+ ],
+ "slm": []
+}

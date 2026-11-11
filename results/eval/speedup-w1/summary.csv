@@ -1,0 +1,5 @@
+arm,n,breaches_mean,breaches_ci95,reward_per_step,applied,util_mean,overrun_steps,same_as
+heur,30,48.97,7.52,1.547,34.97,0.5827,0,
+fix5_m900_s,30,114.8,13.48,1.471,90.97,0.6404,0,
+random,30,122.9,16.88,1.449,113.9,0.6309,0,
+fix5_m900_g,30,151.6,19.82,1.375,157,0.646,0,
