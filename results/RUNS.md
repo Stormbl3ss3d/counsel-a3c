@@ -79,3 +79,11 @@ Compare arms seed by seed with `tools/paired.py`. Findings: `claude/eval_fix6_fi
 | fix6-eval | eval_harness.py @ 6211281 [inferred: last commit touching eval_harness.py / eval_arms.py, 2026-11-10 19:07; envlogs last written 2026-11-11 03:26; uncommitted edits at run time can't be ruled out] | [?] | eval: SLO 150, freq 6666, budget [2500,3600], overrun 0.2, f5-c3; seeds 1000-1009 | noop, random, largest, heur (grow 0.5), const:1x2 + greedy and sampled for m100-m1000 of t113-fix5-f5-c3, t113-fix6-f5-c3-ent0, t113-fix6-f5-c3-ent001 (65 arms, 650 episodes, 0 failed) | results/eval/fix6-eval/ | [measured] breaches mean ± std: heur 47.9 ± 16; best RL fix5 m900 sample 105 ± 22, ent001 m300 sample 106 ± 33; random 106 ± 29; const:1x2 148 ± 31; noop 387 ± 140. Paired: heur beats every arm by ~58 (9-10/10 seeds); RL vs random not distinguishable (CI ±20-35). fix6-ent0 = const:1x2 exactly at every checkpoint; ent001 greedy = const:1x2 except m100 (~no-op). overrun_steps 0 for every arm (budget never binds) |
 
 Supersedes the [single-ep] numbers above for these checkpoints: fix5 m900 is 105 (sample) / 158 (greedy) breaches over 10 seeds, not 83.
+
+## Evaluations: counselctl
+
+Rows written by `tools/counselctl.py run`; the report has the full table.
+
+| Eval | Eval code | Image | Conditions | Models | Report | Headline |
+|---|---|---|---|---|---|---|
+| smoke-01 | 1e1d5b1 | 2fa7ed7e051d | SLO 150, budget [2500, 3600], seeds 1000-1001 | fix5, tiny | results/eval/smoke-01/report.md | [measured] best ckpt tiny_m6_g 41.5; random 100.0; heur 70.5; 0 failed |
