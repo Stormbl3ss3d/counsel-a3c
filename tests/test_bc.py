@@ -5,10 +5,12 @@ whole file in the tools container (it has both), from the repo root:
     docker compose run --rm -T --no-deps tools python3 -m unittest tests.test_bc -v
 On a host without numpy/torch the Recorder tests are skipped, not failed.
 """
-import json, os, sys, tempfile, unittest
+import contextlib, io, json, os, sys, tempfile, threading, unittest
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools"))
 import bc_dataset as D  # noqa: E402
+import bc_offline_eval as O  # noqa: E402
 
 try:
     import numpy as np
@@ -214,7 +216,8 @@ class DatasetTests(unittest.TestCase):
             with open(os.path.join(base, "raw.jsonl"), "w") as f:
                 f.writelines(json.dumps(r) + "\n" for r in self.rows())
             json.dump({"teacher": "heur"}, open(os.path.join(base, "manifest.json"), "w"))
-            info = D.main(["--name", "x", "--root", d])
+            with contextlib.redirect_stdout(io.StringIO()):
+                info = D.main(["--name", "x", "--root", d])
             for k in ("train", "val", "test"):
                 n = sum(1 for _ in open(os.path.join(base, "data", f"{k}.jsonl")))
                 self.assertEqual(n, info["stats"]["rows"][k])
@@ -225,6 +228,114 @@ class DatasetTests(unittest.TestCase):
     def test_missing_raw_refused(self):
         with tempfile.TemporaryDirectory() as d, self.assertRaises(SystemExit):
             D.main(["--name", "nope", "--root", d])
+
+
+# ---------------------------------------------------------------- bc_offline_eval (fake vLLM)
+class FakeVLLM(BaseHTTPRequestHandler):
+    """Serves /v1/models and /v1/chat/completions. The reply is chosen by the user text:
+    'ANS=<text>' -> that text, 'FAIL' -> HTTP 500. Records every request body."""
+    bodies = []
+
+    def log_message(self, *a): pass
+
+    def _send(self, code, obj):
+        b = json.dumps(obj).encode()
+        self.send_response(code); self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+
+    def do_GET(self):
+        self._send(200, {"data": [{"id": "bc-test"}]})
+
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        FakeVLLM.bodies.append(body)
+        user = body["messages"][1]["content"]
+        if "FAIL" in user:
+            return self._send(500, {"error": "boom"})
+        self._send(200, {"choices": [{"message": {"content": user.split("ANS=")[1]}}]})
+
+
+class OfflineEvalTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.srv = HTTPServer(("127.0.0.1", 0), FakeVLLM)
+        cls.base = f"http://127.0.0.1:{cls.srv.server_port}"
+        threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+        cls.srv.server_close()
+
+    def test_parse_reply_matches_vllmpolicy_rule(self):
+        self.assertEqual(O.parse_reply("3", 5), ("3", True))
+        self.assertEqual(O.parse_reply(" 2.\n", 5), ("2", True))
+        self.assertEqual(O.parse_reply("Option 4", 5), ("4", True))
+        self.assertEqual(O.parse_reply("7", 5), (None, False))      # out of range
+        self.assertEqual(O.parse_reply("none", 5), (None, False))
+        self.assertEqual(O.parse_reply(None, 5), (None, False))
+
+    def test_request_body_matches_vllmpolicy(self):
+        b = O.request_body("m", "sys", "usr")
+        self.assertEqual((b["temperature"], b["max_tokens"]), (0, 3))
+        self.assertEqual([m["role"] for m in b["messages"]], ["system", "user"])
+
+    def make(self, d, answers):
+        base = os.path.join(d, "x", "data"); os.makedirs(base)
+        rows = []
+        for i, (label, ans, mode, p_top) in enumerate(answers):
+            r = row(f"s{i}", label, mode=mode, p_top=p_top)
+            r["instruction"], r["input"] = "SYS", f"q{i} ANS={ans}" if ans != "FAIL" else f"q{i} FAIL"
+            rows.append(r)
+        with open(os.path.join(base, "test.jsonl"), "w") as f:
+            f.writelines(json.dumps(r) + "\n" for r in rows)
+        json.dump({"params": {"confident": 0.7},
+                   "baselines": {"global": {"test_acc": 0.5, "test_acc_confident": 0.5}}},
+                  open(os.path.join(base, "dataset.json"), "w"))
+
+    def run_eval(self, d, *extra):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return O.main(["--name", "x", "--root", d, "--model", "bc-test", "--tag", "t",
+                           "--base", self.base, "--concurrency", "3", *extra])
+
+    def test_end_to_end_metrics(self):
+        FakeVLLM.bodies.clear()
+        answers = [("1", "1", 1, 1.0),     # correct, ADD, confident
+                   ("2", "3", 1, 1.0),     # wrong
+                   ("0", "0", 0, 0.5),     # correct, REMOVE, not confident
+                   ("1", "x", 0, 0.9),     # invalid reply
+                   ("2", "FAIL", 1, 1.0)]  # server error
+        with tempfile.TemporaryDirectory() as d:
+            self.make(d, answers)
+            s = self.run_eval(d)
+            preds = [json.loads(l) for l in open(os.path.join(d, "x", "offline", "t", "predictions.jsonl"))]
+        self.assertEqual(s["n"], 5)
+        self.assertAlmostEqual(s["accuracy"], 2 / 5)
+        self.assertAlmostEqual(s["accuracy_confident"], 1 / 4)      # rows 0,1,3,4
+        self.assertAlmostEqual(s["accuracy_add"], 1 / 3)
+        self.assertAlmostEqual(s["accuracy_remove"], 1 / 2)
+        self.assertAlmostEqual(s["invalid_rate"], 1 / 5)
+        self.assertAlmostEqual(s["error_rate"], 1 / 5)
+        self.assertEqual(s["confusion"]["1"], {"1": 1, "invalid": 1})
+        self.assertEqual(s["baselines"]["global"]["test_acc"], 0.5)
+        self.assertEqual([p["label"] for p in preds], ["1", "2", "0", "1", "2"])   # input order kept
+        self.assertTrue(all(b["messages"][0]["content"] == "SYS" for b in FakeVLLM.bodies))
+
+    def test_limit(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.make(d, [("1", "1", 1, 1.0)] * 4)
+            self.assertEqual(self.run_eval(d, "--limit", "2")["n"], 2)
+
+    def test_refuses_unserved_model_and_unreachable_server(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.make(d, [("1", "1", 1, 1.0)])
+            with self.assertRaises(SystemExit) as e, contextlib.redirect_stdout(io.StringIO()):
+                O.main(["--name", "x", "--root", d, "--model", "other", "--tag", "t", "--base", self.base])
+            self.assertIn("not served", str(e.exception))
+            with self.assertRaises(SystemExit) as e, contextlib.redirect_stdout(io.StringIO()):
+                O.main(["--name", "x", "--root", d, "--model", "bc-test", "--tag", "t",
+                        "--base", "http://127.0.0.1:9"])
+            self.assertIn("not reachable", str(e.exception))
 
 
 if __name__ == "__main__":
