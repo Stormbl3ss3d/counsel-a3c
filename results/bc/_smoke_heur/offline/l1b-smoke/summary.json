@@ -1,0 +1,70 @@
+{
+ "dataset": "_smoke_heur",
+ "split": "test",
+ "model": "bc-_smoke_heur-l1b-smoke",
+ "tag": "l1b-smoke",
+ "base": "http://localhost:9000",
+ "confident_threshold": 0.7,
+ "wall_s": 0.8340246677398682,
+ "n": 72,
+ "accuracy": 0.9166666666666666,
+ "accuracy_confident": 0.9166666666666666,
+ "n_confident": 72,
+ "accuracy_add": 0.8888888888888888,
+ "accuracy_remove": 0.9259259259259259,
+ "accuracy_valid_only": 0.9166666666666666,
+ "invalid_rate": 0.0,
+ "error_rate": 0.0,
+ "lat_ms_mean": 90.6915857641353,
+ "lat_ms_p95": 188.44882400298957,
+ "confusion": {
+  "0": {
+   "0": 36
+  },
+  "1": {
+   "1": 12,
+   "2": 2
+  },
+  "2": {
+   "1": 4,
+   "2": 4
+  },
+  "5": {
+   "5": 14
+  }
+ },
+ "baselines": {
+  "global": {
+   "test_acc": 0.19444444444444445,
+   "test_acc_confident": 0.19444444444444445,
+   "train_acc": 0.3786407766990291,
+   "groups": 1
+  },
+  "mode": {
+   "test_acc": 0.3611111111111111,
+   "test_acc_confident": 0.3611111111111111,
+   "train_acc": 0.5145631067961165,
+   "groups": 2
+  },
+  "mode+comp": {
+   "test_acc": 0.9166666666666666,
+   "test_acc_confident": 0.9166666666666666,
+   "train_acc": 0.7087378640776699,
+   "groups": 6
+  },
+  "mode+comp+loadbin": {
+   "test_acc": 0.9166666666666666,
+   "test_acc_confident": 0.9166666666666666,
+   "train_acc": 0.7087378640776699,
+   "groups": 7
+  },
+  "mode+comp+n_options": {
+   "test_acc": 0.9444444444444444,
+   "test_acc_confident": 0.9444444444444444,
+   "train_acc": 0.8155339805825242,
+   "groups": 9
+  }
+ },
+ "dataset_raw_sha256": "36133681b79fc1045bddb195b1c27cc4e8981c7137debddb234ee923b04c2687",
+ "created": "2026-11-11T18:34:07"
+}

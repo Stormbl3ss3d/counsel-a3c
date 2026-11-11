@@ -1,0 +1,77 @@
+{
+ "dataset": "heur100",
+ "split": "test",
+ "model": "bc-heur100-l1b-e2",
+ "tag": "l1b-e2",
+ "base": "http://localhost:9000",
+ "confident_threshold": 0.7,
+ "wall_s": 11.554010391235352,
+ "n": 1125,
+ "accuracy": 0.9964444444444445,
+ "accuracy_confident": 0.9964444444444445,
+ "n_confident": 1125,
+ "accuracy_add": 1.0,
+ "accuracy_remove": 0.9954233409610984,
+ "accuracy_valid_only": 0.9964444444444445,
+ "invalid_rate": 0.0,
+ "error_rate": 0.0,
+ "lat_ms_mean": 81.95508264442388,
+ "lat_ms_p95": 145.11030899302568,
+ "confusion": {
+  "0": {
+   "0": 723,
+   "1": 1
+  },
+  "1": {
+   "1": 91
+  },
+  "2": {
+   "1": 1,
+   "2": 106
+  },
+  "3": {
+   "2": 2,
+   "3": 14
+  },
+  "4": {
+   "4": 4
+  },
+  "5": {
+   "5": 183
+  }
+ },
+ "baselines": {
+  "global": {
+   "test_acc": 0.6435555555555555,
+   "test_acc_confident": 0.6435555555555555,
+   "train_acc": 0.6727651690597499,
+   "groups": 1
+  },
+  "mode": {
+   "test_acc": 0.8062222222222222,
+   "test_acc_confident": 0.8062222222222222,
+   "train_acc": 0.8226030569708198,
+   "groups": 2
+  },
+  "mode+comp": {
+   "test_acc": 0.9146666666666666,
+   "test_acc_confident": 0.9146666666666666,
+   "train_acc": 0.9144279759147753,
+   "groups": 6
+  },
+  "mode+comp+loadbin": {
+   "test_acc": 0.9146666666666666,
+   "test_acc_confident": 0.9146666666666666,
+   "train_acc": 0.9147753589624826,
+   "groups": 8
+  },
+  "mode+comp+n_options": {
+   "test_acc": 0.9457777777777778,
+   "test_acc_confident": 0.9457777777777778,
+   "train_acc": 0.9504400185270959,
+   "groups": 11
+  }
+ },
+ "dataset_raw_sha256": "454b6e537e21b8f3619a3f2e5c9beacf1df8b8d2bdf9f7d838e251804b82c645",
+ "created": "2026-11-11T19:48:50"
+}

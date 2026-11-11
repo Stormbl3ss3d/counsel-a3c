@@ -1,0 +1,24 @@
+{
+ "name": "heur100",
+ "teacher": "heur",
+ "teacher_sha256": null,
+ "label_mode": "argmax",
+ "prompt_id": "operator",
+ "prompt_sha256": "69b2c7e70f7c31de",
+ "regime": "eval",
+ "regime_params": {
+  "slo": 150,
+  "freq": 6666,
+  "knob": 0.05,
+  "budget": [
+   2500,
+   3600
+  ],
+  "slack": 0.2
+ },
+ "nconf": 5,
+ "ncomp": 3,
+ "seeds": "2000-2099",
+ "git_commit": "7718650",
+ "created": "2026-11-11T13:31:21"
+}

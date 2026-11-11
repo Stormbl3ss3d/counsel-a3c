@@ -1,0 +1,112 @@
+{
+ "dataset": "_smoke_heur",
+ "run": "l1b-smoke",
+ "base_model": "unsloth/Llama-3.2-1B-Instruct",
+ "family": "llama",
+ "hyperparams": {
+  "epochs": 2,
+  "max_steps": 20,
+  "lr": 0.0002,
+  "r": 16,
+  "batch": 4,
+  "grad_accum": 4,
+  "max_len": 2048,
+  "load_4bit": false,
+  "seed": 0,
+  "no_merge": false
+ },
+ "dataset_json_sha256": "c445db7cae9babfad4a777c3ad7ff74624172a2cb8139e63e7ed113ba00bec95",
+ "rows": {
+  "train": 103,
+  "val": 32,
+  "dropped_too_long": 0
+ },
+ "mask_check": {
+  "loss_text": "5<|eot_id|>",
+  "loss_tokens": 2,
+  "leading_bos": 1
+ },
+ "precision": "bf16",
+ "train_runtime_s": 27.8759,
+ "train_loss": 0.5876605629920959,
+ "final_eval": {
+  "eval_loss": 0.2344379723072052,
+  "eval_runtime": 0.822,
+  "eval_samples_per_second": 38.93,
+  "eval_steps_per_second": 9.732,
+  "epoch": 2.9230769230769234
+ },
+ "log_history": [
+  {
+   "eval_loss": 0.4274701476097107,
+   "eval_runtime": 0.8503,
+   "eval_samples_per_second": 37.635,
+   "eval_steps_per_second": 9.409,
+   "epoch": 1.0,
+   "step": 7
+  },
+  {
+   "loss": 0.8210894584655761,
+   "grad_norm": 1.4285459518432617,
+   "learning_rate": 0.00011578947368421053,
+   "epoch": 1.4615384615384617,
+   "step": 10
+  },
+  {
+   "eval_loss": 0.30797404050827026,
+   "eval_runtime": 0.8598,
+   "eval_samples_per_second": 37.216,
+   "eval_steps_per_second": 9.304,
+   "epoch": 2.0,
+   "step": 14
+  },
+  {
+   "loss": 0.35423166751861573,
+   "grad_norm": 1.9280145168304443,
+   "learning_rate": 1.0526315789473684e-05,
+   "epoch": 2.9230769230769234,
+   "step": 20
+  },
+  {
+   "eval_loss": 0.2344379723072052,
+   "eval_runtime": 0.8277,
+   "eval_samples_per_second": 38.661,
+   "eval_steps_per_second": 9.665,
+   "epoch": 2.9230769230769234,
+   "step": 20
+  },
+  {
+   "train_runtime": 27.8759,
+   "train_samples_per_second": 11.479,
+   "train_steps_per_second": 0.717,
+   "total_flos": 427052473294848.0,
+   "train_loss": 0.5876605629920959,
+   "epoch": 2.9230769230769234,
+   "step": 20
+  },
+  {
+   "eval_loss": 0.2344379723072052,
+   "eval_runtime": 0.822,
+   "eval_samples_per_second": 38.93,
+   "eval_steps_per_second": 9.732,
+   "epoch": 2.9230769230769234,
+   "step": 20
+  }
+ ],
+ "peak_gpu_mem_gib": 2.551909923553467,
+ "versions": {
+  "python": "3.12.3",
+  "torch": "2.14.1+cu132",
+  "cuda": "13.2",
+  "transformers": "5.17.0",
+  "trl": "1.15.0",
+  "peft": "0.21.2",
+  "unsloth": "2026.11.3"
+ },
+ "outputs": {
+  "adapter": "adapter",
+  "merged": "merged"
+ },
+ "wall_s": 59.4808783531189,
+ "created": "2026-11-11T18:19:45"
+}

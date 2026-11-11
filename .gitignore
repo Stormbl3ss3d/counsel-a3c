@@ -146,3 +146,12 @@ results/raw/
 results/eval/*/envlogs/
 scratch/
 runs/
+
+# BC pipeline: models and datasets are large; keep only the small JSON provenance/summaries
+results/bc/**
+!results/bc/**/
+!results/bc/**/manifest.json
+!results/bc/**/dataset.json
+!results/bc/**/train_manifest.json
+!results/bc/**/summary.json
+unsloth_compiled_cache/
