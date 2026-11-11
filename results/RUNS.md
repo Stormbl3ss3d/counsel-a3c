@@ -87,3 +87,4 @@ Rows written by `tools/counselctl.py run`; the report has the full table.
 | Eval | Eval code | Image | Conditions | Models | Report | Headline |
 |---|---|---|---|---|---|---|
 | smoke-01 | 1e1d5b1 | 2fa7ed7e051d | SLO 150, budget [2500, 3600], seeds 1000-1001 | fix5, tiny | results/eval/smoke-01/report.md | [measured] best ckpt tiny_m6_g 41.5; random 100.0; heur 70.5; 0 failed |
+| fix6-eval-v2 | 83a5ce0 | 2fa7ed7e051d | SLO 150, budget [2500, 3600], seeds 1000-1009 | fix5, e0, e1 | results/eval/fix6-eval-v2/report.md | [measured] best ckpt fix5_m900_s 105.4; random 106.3; heur 47.9; 0 failed |
