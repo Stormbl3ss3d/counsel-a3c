@@ -91,7 +91,7 @@ class DriverTests(unittest.TestCase):
         imported = {a.name.split(".")[0] for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom))
                     for a in (n.names if isinstance(n, ast.Import) else [type("x", (), {"name": n.module})])}
         self.assertLessEqual(imported, {"inspect", "json", "os", "sys", "time", "multiprocessing",
-                                        "eval_harness", "eval_arms", "traceback"})
+                                        "eval_harness", "eval_arms", "traceback", "urllib"})
 
 
 class ConditionTests(unittest.TestCase):

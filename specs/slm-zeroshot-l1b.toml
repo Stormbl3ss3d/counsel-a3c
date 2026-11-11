@@ -1,0 +1,17 @@
+# Online eval of zero-shot Llama-3.2-1B-Instruct (no fine-tuning) with the operator prompt.
+# Needs:  vllm serve unsloth/Llama-3.2-1B-Instruct
+name = "slm-zeroshot-l1b"
+
+[eval]
+seeds = "1000-1009"
+modes = ["greedy"]
+baselines = ["noop", "random", "heur", "const:1x2"]
+reference = ["random", "heur"]
+
+[vllm]
+base = "http://localhost:9000"
+
+[[slm]]
+label = "zsl1b"
+model = "unsloth/Llama-3.2-1B-Instruct"
+prompt = "operator"

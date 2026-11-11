@@ -70,11 +70,15 @@ TOP = {
              "baselines": ["noop", "random", "largest", "heur", "const:1x2"],
              "reference": ["random", "heur"]},           # paired tests: every arm vs each of these
     # training watchdog (only used by models with a train block)
+    # vLLM server for [[slm]] arms. localhost here = the host; the eval container reaches it as
+    # host.docker.internal (added with --add-host only when the spec has [[slm]] entries).
+    "vllm": {"base": "http://localhost:9000"},
     "watch": {"enabled": True, "actor_limit": 1e4, "collapse_ent": 1e-3, "window": 50,
               "on_collapse": "warn", "stall_min": 10},
 }
 MODEL = {"label": None, "from": None, "train": None, "checkpoints": "all"}
 TRAIN = {"code": "main", "episodes": 1000, "ent": 0.0}
+SLM = {"label": None, "model": None, "prompt": "operator"}   # model = vLLM --served-model-name
 
 
 class SpecError(ValueError):
@@ -89,7 +93,7 @@ def _merge_section(default, user, where):
 
 
 def merge(user):
-    bad = set(user) - set(TOP) - {"models"}
+    bad = set(user) - set(TOP) - {"models", "slm"}
     if bad:
         raise SpecError(f"unknown top-level keys: {sorted(bad)}")
     s = {}
@@ -101,6 +105,7 @@ def merge(user):
         if mm["train"] is not None:
             mm["train"] = _merge_section(TRAIN, mm["train"], f"[[models]] #{i + 1} train")
         s["models"].append(mm)
+    s["slm"] = [_merge_section(SLM, x, f"[[slm]] #{i + 1}") for i, x in enumerate(user.get("slm", []))]
     return s
 
 
@@ -140,6 +145,18 @@ def validate(s):
             t = m["train"]
             need(isinstance(t["episodes"], int) and t["episodes"] >= 1, f"{tag}: train.episodes >= 1")
             need(isinstance(t["ent"], (int, float)) and 0 <= t["ent"] <= 0.1, f"{tag}: train.ent 0-0.1")
+    need(isinstance(s["vllm"]["base"], str) and re.fullmatch(r"https?://[^/\s]+", s["vllm"]["base"] or ""),
+         "vllm.base: like http://localhost:9000 (scheme, host, port; no path)")
+    slabels = [x["label"] for x in s["slm"]]
+    need(len(slabels) == len(set(slabels)), f"slm: duplicate labels {slabels}")
+    for i, x in enumerate(s["slm"]):
+        tag = f"slm #{i + 1} ({x['label']})"
+        need(isinstance(x["label"], str) and re.fullmatch(LABEL_RE, x["label"] or ""),
+             f"{tag}: label required, lowercase letters/digits, starts with a letter, <= 12 chars")
+        need(isinstance(x["model"], str) and x["model"] and ":" not in x["model"] and not x["model"].isspace(),
+             f"{tag}: model = the vLLM served model name (no ':')")
+        need(isinstance(x["prompt"], str) and re.fullmatch(r"[a-z][a-z0-9_]*", x["prompt"] or ""),
+             f"{tag}: prompt = a key of eval_arms.PROMPTS, e.g. 'operator'")
     if errs:
         raise SpecError("spec invalid:\n  - " + "\n  - ".join(errs))
     return s
@@ -189,6 +206,18 @@ def fmt_dt(s):
     s = int(s); return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}"
 
 
+def vllm_models(base, timeout=5.0):
+    """The served models ([{id, root, max_model_len, ...}]) from an OpenAI-compatible server."""
+    import urllib.request
+    with urllib.request.urlopen(f"{base}/v1/models", timeout=timeout) as r:
+        return json.loads(r.read())["data"]
+
+
+def container_base(base):
+    """localhost inside the eval container is the container; the host is host.docker.internal."""
+    return re.sub(r"^(https?://)(localhost|127\.0\.0\.1)(?=[:/]|$)", r"\1host.docker.internal", base)
+
+
 def make_worktree(repo, commit, dest):
     sh(["git", "worktree", "prune"], repo)     # forget worktrees whose folders were deleted by hand
     ok, out = sh(["git", "worktree", "add", "--detach", dest, commit], repo)
@@ -220,13 +249,13 @@ cd {C_CODE}
 """
 
 
-def docker_cmd(cname, image, mounts, script, why):
+def docker_cmd(cname, image, mounts, script, why, extra=()):
     uid, gid = os.getuid(), os.getgid()
     cmd = ["docker", "run", "--rm", "--init", "--name", cname, "--user", f"{uid}:{gid}",
            "-e", "HOME=/tmp", "-e", "OMP_NUM_THREADS=1", "--shm-size=1g"]
     for src, dst, mode in mounts:
         cmd += ["-v", f"{src}:{dst}:{mode}"]
-    cmd += ["-w", C_CODE, image, "bash", "-c", script]
+    cmd += list(extra) + ["-w", C_CODE, image, "bash", "-c", script]
     if can_inhibit_sleep():
         cmd = ["systemd-inhibit", "--what=sleep:idle", "--who=counselctl", f"--why={why}"] + cmd
     return cmd
@@ -486,7 +515,7 @@ def worker(port, jobs, results, cfg):
         name, spec, seed = job
         try:
             if name not in arms:
-                arms[name] = make_arm(spec)
+                arms[name] = make_arm(spec, **({"vllm_base": cfg["vllm_base"]} if cfg.get("vllm_base") else {}))
             t0 = time.time()
             row = eh.run_episode(arms[name], seed, port, cfg["nconf"], cfg["ncomp"], cfg["R"],
                                  os.path.join(cfg["envlogs"], f"p{port}"))
@@ -513,6 +542,15 @@ def main():
     print(f"COUNSELCTL-EVAL: {total} episodes to run, {len(have)} already done", flush=True)
     if not todo:
         return
+    if cfg.get("vllm_base") and any(n.startswith("slm_") for n, _, _ in todo):
+        import urllib.request
+        try:
+            with urllib.request.urlopen(cfg["vllm_base"] + "/v1/models", timeout=10) as r:
+                ids = [m["id"] for m in json.loads(r.read())["data"]]
+        except Exception as e:
+            sys.exit(f"COUNSELCTL-EVAL: vLLM not reachable from the container at {cfg['vllm_base']}: {e!r}. "
+                     "Is vllm serve listening on all interfaces (its default) and not blocked by a firewall?")
+        print(f"COUNSELCTL-EVAL: vLLM reachable at {cfg['vllm_base']}, serving {ids}", flush=True)
     ctx = mp.get_context("spawn")
     jobs, results = ctx.Queue(), ctx.Queue()
     for j in todo: jobs.put(j)
@@ -545,6 +583,8 @@ def arms_for(repo, s, plan):
             for mode in s["eval"]["modes"]:
                 arms.append((f"{m['label']}_m{ep}_{mode[0]}", f"torch:{C_CKPT}/{m['label']}/model{ep}.pt:{mode}",
                              os.path.join(mdir, f"model{ep}.pt")))
+    for x in s.get("slm", []):
+        arms.append((f"slm_{x['label']}", f"slm:{x['model']}:{x['prompt']}", None))
     return arms
 
 
@@ -555,14 +595,16 @@ def run_eval(repo, s, job, out, arms, mounts_ckpt, poll):
     cfg = {"arms": [[n, sp] for n, sp, _ in arms], "seeds": seeds, "ports": ports,
            "nconf": c["flavors"], "ncomp": c["chain"], "envlogs": f"{C_JOB}/envlogs", "code": C_CODE,
            "episodes": f"{C_RESULTS}/episodes.jsonl",
-           "R": {"slo": c["slo"], "freq": freq_of(c), "knob": c["knob"], "budget": c["budget"], "slack": c["overrun"]}}
+           "R": {"slo": c["slo"], "freq": freq_of(c), "knob": c["knob"], "budget": c["budget"], "slack": c["overrun"]},
+           "vllm_base": container_base(s["vllm"]["base"]) if s.get("slm") else None}
     _dump(cfg, os.path.join(job, "eval_config.json"))
     _write(os.path.join(job, "eval_driver.py"), EVAL_DRIVER)
     script = load_server_script(s["workers"], f"{C_JOB}/loadservers.log") + \
         f"exec python3 -u {C_JOB}/eval_driver.py {C_JOB}/eval_config.json\n"
     mounts = [(os.path.join(job, "code"), C_CODE, "ro"), (job, C_JOB, "rw"), (out, C_RESULTS, "rw")] + mounts_ckpt
     cname = f"counsel-eval-{s['name']}"
-    cmd = docker_cmd(cname, s["image"], mounts, script, f"evaluating {s['name']}")
+    extra = ["--add-host", "host.docker.internal:host-gateway"] if s.get("slm") else []
+    cmd = docker_cmd(cname, s["image"], mounts, script, f"evaluating {s['name']}", extra)
     log_path = os.path.join(job, "eval.log")
     todo = len(seeds) * len(arms)
     print(f"  evaluating {len(arms)} arms x {len(seeds)} seeds = {todo} episodes on {len(ports)} workers; "
@@ -782,6 +824,29 @@ def build_report(repo, s, out, plan, prov, train_notes, warnings):
     L += ["CI = 95% t-interval of the mean over seeds. `= X on every seed` means breaches, actions applied, "
           "and mean CPU/memory match baseline X exactly on every seed: in practice the same policy.", ""]
 
+    slm_arms = [a for a in order if a.startswith("slm_")]
+    slm_bad = []
+    if slm_arms:
+        L += ["## SLM arms (served by vLLM)", "",
+              "| arm | served model | queries/episode | invalid | errors | decision ms (mean / p95) |",
+              "|---|---|---|---|---|---|"]
+        for a in slm_arms:
+            rs = list(by[a]["rows"].values())
+            q = sum(r.get("llm_queries") or 0 for r in rs)
+            inv = sum(r.get("llm_invalid") or 0 for r in rs)
+            er = sum(r.get("llm_errors") or 0 for r in rs)
+            model = str(rs[0].get("spec", "")).split(":", 1)[-1]
+            if q:
+                L.append(f"| {a} | `{model}` | {q / len(rs):.1f} | {inv / q:.1%} | {er / q:.1%} | "
+                         f"{mean(a, 'llm_lat_ms_mean'):.0f} / {mean(a, 'llm_lat_ms_p95'):.0f} |")
+                if er / q > 0.01:
+                    slm_bad.append(f"{a}: {er / q:.1%} of LLM requests failed and fell back to no change")
+            else:
+                L.append(f"| {a} | `{model}` | 0 | - | - | - |")
+        L += ["", "Invalid = the reply was not a listed option number; errors = the request failed. Both fall back "
+              "to action 0 (no change). vLLM at temperature 0 is not guaranteed bit-exact across runs or batch "
+              "sizes, so SLM rows can differ slightly on a re-run.", ""]
+
     refs = [r.replace(":", "_").replace(".", "") for r in s["eval"]["reference"]]
     refs = [r for r in refs if r in by]
     if refs:
@@ -818,6 +883,8 @@ def build_report(repo, s, out, plan, prov, train_notes, warnings):
     if not over:
         L.append(f"- No arm ever exceeded the budget (overrun steps 0 everywhere): budget {c['budget']} does not bind "
                  f"under these conditions.")
+    for x in slm_bad:
+        L.append(f"- WARNING {x}: those episodes do not measure the model")
     if bad:
         L.append(f"- {len(bad)} episode(s) failed; first error: `{bad[0]['error'][:200]}`")
     L.append("")
@@ -888,7 +955,8 @@ def cmd_run(a):
         raise SpecError(f"{out} exists but was not made by counselctl: pick another name")
     if os.path.exists(resolved_p):
         old = _load(resolved_p)
-        strip = lambda x: {**x, "eval": {**x["eval"], "seeds": None}}
+        strip = lambda x: {**x, "eval": {**x["eval"], "seeds": None},
+                           "vllm": x.get("vllm", TOP["vllm"]), "slm": x.get("slm", [])}
         if strip(old) != strip(s):
             raise SpecError(f"{s['name']} already exists with different settings (only eval.seeds may change "
                             f"on a re-run): use a new name")
@@ -921,6 +989,19 @@ def cmd_run(a):
                                 + ", ".join(f"const:{c}x{m}" for c, m in sorted(shapes)))
     else:
         problems.append(f"model/configs/flavors{nf}.json not found at HEAD")
+    if s["slm"]:
+        try:
+            served = [m["id"] for m in vllm_models(s["vllm"]["base"])]
+            for x in s["slm"]:
+                if x["model"] not in served:
+                    problems.append(f"slm {x['label']}: '{x['model']}' is not served at {s['vllm']['base']} "
+                                    f"(serving {served}); one vllm serve = one model, so put one [[slm]] per run")
+        except Exception as ex:
+            problems.append(f"vLLM not reachable at {s['vllm']['base']} ({ex!r}): start vllm serve first")
+        ok, arms_src = sh(["git", "show", "HEAD:tools/eval_arms.py"], repo)
+        for x in s["slm"]:
+            if ok and f'"{x["prompt"]}":' not in arms_src:
+                problems.append(f"slm {x['label']}: prompt '{x['prompt']}' is not a key of PROMPTS in eval_arms.py")
 
     plan, train_notes, to_train = [], {}, []
     for m in s["models"]:
@@ -963,6 +1044,8 @@ def cmd_run(a):
     for m in s["models"]:
         src = f"train {m['train']['code']} {m['train']['episodes']} eps ent {m['train']['ent']}" if m["train"] else m["from"]
         print(f"  model {m['label']:<12} {src:<40} {train_notes.get(m['label'], '')}")
+    for x in s["slm"]:
+        print(f"  slm   {x['label']:<12} {x['model']} (prompt {x['prompt']}) via {s['vllm']['base']}")
     for w in warnings:
         print(f"WARNING: {w}")
     if problems:
@@ -1042,6 +1125,12 @@ def _run_locked(a, repo, spec_path, s, out, job, resolved_p, plan, to_train, tra
             "eval_commit": eval_commit, "tool_describe": tool_describe,
             "counselctl_sha256": sha256(os.path.abspath(__file__)), "image": s["image"], "image_id": iid,
             "checkpoint_sha256": ckpts, "pip_freeze": pip}
+    if s["slm"]:
+        try:
+            prov["vllm"] = {"base": s["vllm"]["base"], "container_base": container_base(s["vllm"]["base"]),
+                            "served": vllm_models(s["vllm"]["base"])}
+        except Exception as ex:
+            prov["vllm"] = {"base": s["vllm"]["base"], "error": repr(ex)}
     old_prov = os.path.join(out, "provenance.json")
     if os.path.exists(old_prov):
         prev = _load(old_prov)
